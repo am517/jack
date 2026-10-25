@@ -1,31 +1,22 @@
-# Homebrew (shared Windups tap): draft
+# Homebrew
 
-One tap, `homebrew-tap`, holds formulas for all Windups apps (jack, saikanji, ...).
-Nothing is published yet.
+`jack.rb` mirrors `Formula/jack.rb` in [am517/homebrew-tap](https://github.com/am517/homebrew-tap).
+
+```zsh
+brew install am517/tap/jack
+```
 
 ## Embedded API keys (optional)
 
-`jack` reads `JACK_TMDB_TOKEN` and `JACK_TVDB_KEY` at compile time. In the formula's
-`install`, set them from the builder's environment before `cargo install`:
+`jack` reads `JACK_TMDB_TOKEN` and `JACK_TVDB_KEY` at compile time. The formula forwards
+`HOMEBREW_JACK_TMDB_TOKEN` / `HOMEBREW_JACK_TVDB_KEY` if they're set:
+`HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... brew install --build-from-source am517/tap/jack`.
+By default no keys are embedded, so put them in `~/.config/windups/jack/config.toml`.
+Keys embedded in a binary can be extracted, so never ship private keys in a public bottle.
 
-```ruby
-ENV["JACK_TMDB_TOKEN"] = ENV.fetch("HOMEBREW_JACK_TMDB_TOKEN", "")
-ENV["JACK_TVDB_KEY"]   = ENV.fetch("HOMEBREW_JACK_TVDB_KEY", "")
-```
+## Releasing a new version
 
-Build with `HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... brew install --build-from-source ...`
-(Homebrew passes `HOMEBREW_*` variables through), or from a CI secret when building bottles.
-Caveat: keys embedded in a public bottle or binary can be extracted (e.g. with `strings`); use
-keys you're allowed to distribute, or leave them out and have users set them in
-`~/.config/windups/jack/config.toml`.
-
-## Publish
-
-1. Push jack to GitHub, then tag a release: `git tag v0.1.0 && git push --tags`.
-2. Get the tarball checksum:
-   `curl -L https://github.com/OWNER/jack/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256`
-3. In `jack.rb`, fill in `homepage`, `url`, `sha256`, `license` (all marked TODO).
-4. Create the tap repo `OWNER/homebrew-tap` (or reuse the existing one) and
-   copy `jack.rb` to `Formula/jack.rb` there, beside `Formula/saikanji.rb`.
-5. Test locally: `brew install --build-from-source OWNER/windups/jack && brew test jack && brew audit --strict jack`.
-6. Install: `brew tap OWNER/windups && brew install jack`.
+1. Bump `version` in `Cargo.toml`, commit, then `git tag -a vX.Y.Z && git push origin vX.Y.Z`.
+2. `curl -sL https://github.com/am517/jack/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256`
+3. Update `url` and `sha256` in the tap's `Formula/jack.rb` and copy it here.
+4. If brew is available: `brew audit --strict am517/tap/jack && brew test jack`.
