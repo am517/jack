@@ -26,11 +26,13 @@ fn tidy(s: &str, cfg: &MatchCfg) -> Result<String, String> {
     Ok(s.split_whitespace().collect::<Vec<_>>().join(" ").trim_matches(|c: char| " -([".contains(c)).to_string())
 }
 
-pub fn parse(path: &Path, cfg: &MatchCfg) -> Result<Query, String> {
+/// `kind`: Some("tv") skips movie patterns, Some("movie") skips TV patterns.
+pub fn parse(path: &Path, cfg: &MatchCfg, kind: Option<&str>) -> Result<Query, String> {
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let stem = if cfg.separators.is_empty() { stem } else { re(&cfg.separators)?.replace_all(&stem, " ").into_owned() };
     let mut q = Query::default();
-    for p in &cfg.tv_patterns {
+    let none = vec![];
+    for p in if kind == Some("movie") { &none } else { &cfg.tv_patterns } {
         if let Some(c) = re(p)?.captures(&stem) {
             q.season = c.name("season").and_then(|m| m.as_str().parse().ok());
             q.episode = c.name("episode").and_then(|m| m.as_str().parse().ok());
@@ -47,7 +49,7 @@ pub fn parse(path: &Path, cfg: &MatchCfg) -> Result<Query, String> {
             return Ok(q);
         }
     }
-    for p in &cfg.movie_patterns {
+    for p in if kind == Some("tv") { &none } else { &cfg.movie_patterns } {
         if let Some(c) = re(p)?.captures(&stem) {
             q.title = tidy(c.name("title").map_or("", |m| m.as_str()), cfg)?;
             q.year = c.name("year").map(|m| m.as_str().to_string());
@@ -56,6 +58,11 @@ pub fn parse(path: &Path, cfg: &MatchCfg) -> Result<Query, String> {
     }
     q.title = tidy(&stem, cfg)?;
     Ok(q)
+}
+
+/// "auto"/unset -> None.
+pub fn forced(kind: Option<&str>) -> Option<&str> {
+    kind.filter(|k| *k != "auto")
 }
 
 #[cfg(test)]
@@ -68,15 +75,20 @@ mod tests {
 
     #[test]
     fn movies_and_tv() {
-        let q = parse(Path::new("The.Matrix.1999.1080p.BluRay.x264.mkv"), &cfg()).unwrap();
+        let q = parse(Path::new("The.Matrix.1999.1080p.BluRay.x264.mkv"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.year.as_deref(), q.season), ("The Matrix", Some("1999"), None));
-        let q = parse(Path::new("Blade Runner 2049 (2017).mp4"), &cfg()).unwrap();
+        let q = parse(Path::new("Blade Runner 2049 (2017).mp4"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.year.as_deref()), ("Blade Runner 2049", Some("2017")));
-        let q = parse(Path::new("Saiki.K.S01E02.720p.WEB-DL.mkv"), &cfg()).unwrap();
+        let q = parse(Path::new("Saiki.K.S01E02.720p.WEB-DL.mkv"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.season, q.episode), ("Saiki K", Some(1), Some(2)));
-        let q = parse(Path::new("Show/Season 2/2x05.m4v"), &cfg()).unwrap();
+        let q = parse(Path::new("Show/Season 2/2x05.m4v"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.season, q.episode), ("Show", Some(2), Some(5)));
-        let q = parse(Path::new("home video.mp4"), &cfg()).unwrap();
+        let q = parse(Path::new("home video.mp4"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.year), ("home video", None));
+        // forced type skips the other heuristics
+        let q = parse(Path::new("Show.S01E02.mkv"), &cfg(), Some("movie")).unwrap();
+        assert_eq!((q.title.as_str(), q.season), ("Show S01E02", None));
+        let q = parse(Path::new("1917 (2019).mkv"), &cfg(), Some("tv")).unwrap();
+        assert_eq!((q.title.as_str(), q.year), ("1917 (2019)", None));
     }
 }

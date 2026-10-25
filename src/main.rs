@@ -64,6 +64,15 @@ struct Cli {
     /// Art orientation: poster or landscape
     #[arg(long, value_parser = ["poster", "landscape"])]
     art: Option<String>,
+    /// Media type: tv, movie or auto (forces filename matching and provider search)
+    #[arg(long = "type", value_parser = ["tv", "movie", "auto"])]
+    kind: Option<String>,
+    /// Same as --type tv
+    #[arg(long, conflicts_with = "movie")]
+    tv: bool,
+    /// Same as --type movie
+    #[arg(long)]
+    movie: bool,
     /// Fetch metadata/artwork only (saved beside the file); don't modify media
     #[arg(short, long)]
     download_only: bool,
@@ -100,6 +109,7 @@ impl From<&Cli> for Settings {
             name: c.name.clone(),
             year: c.year.clone(),
             art_style: c.art.clone(),
+            kind: c.tv.then(|| "tv".into()).or(c.movie.then(|| "movie".into())).or(c.kind.clone()),
             ..Default::default()
         }
     }
@@ -126,7 +136,9 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
 
 /// Query from the filename plus ids from flags/sidecar.
 fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
-    let mut q = matcher::parse(path, &cfg.matching)?;
+    let kind = matcher::forced(s.kind.as_deref());
+    let mut q = matcher::parse(path, &cfg.matching, kind)?;
+    q.kind = kind.map(String::from);
     // ids written by an earlier run beat the filename guess; flags/sidecar/config ids beat both.
     let f = tagger::read_ids(path, &cfg.tagger);
     let g = |k: &str| f.get(k).cloned();
@@ -353,6 +365,9 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     if let Some(v) = &cli.providers {
         ch.push(Change { key: "providers.order", value: Value::Array(v.iter().collect()), secret: false });
     }
+    if let Some(v) = &Settings::from(cli).kind {
+        ch.push(s("type", v));
+    }
     if let Some(v) = &cli.print_format {
         ch.push(s("print_format", v));
     }
@@ -374,6 +389,11 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
 
 /// Returns (report text, --print output, number of failed files).
 fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
+    if let (Some(t), Some(f)) = (&cli.kind, cli.tv.then_some("tv").or(cli.movie.then_some("movie"))) {
+        if t != f {
+            return Err(format!("--{f} conflicts with --type {t}"));
+        }
+    }
     let mut pre = String::new();
     if cli.set {
         pre = save_flags(cli)?;
@@ -820,6 +840,18 @@ mod tests {
         assert!(t.contains("print = true") && t.contains("print_format = \"json\""), "{t}");
         let (_, p, _) = run(&cli(&["--config", cs, ms]), &h()).unwrap();
         assert!(serde_json::from_str::<serde_json::Value>(&p).unwrap().is_array());
+    }
+
+    #[test]
+    fn type_flags_conflicts_and_set() {
+        assert!(Cli::try_parse_from(["jack", "--tv", "--movie", "x"]).is_err());
+        assert!(run(&cli(&["--type", "movie", "--tv", "x"]), &providers::fake::FakeHttp::new(vec![])).unwrap_err().contains("conflicts"));
+        assert_eq!(Settings::from(&cli(&["--movie", "x"])).kind.as_deref(), Some("movie"));
+        let d = tempfile::tempdir().unwrap();
+        let c = d.path().join("c.toml");
+        run(&cli(&["--set", "--config", c.to_str().unwrap(), "--tv"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        assert!(fs::read_to_string(&c).unwrap().contains("type = \"tv\""));
+        assert_eq!(config::load(Some(&c)).unwrap().base.kind.as_deref(), Some("tv"));
     }
 
     #[test]

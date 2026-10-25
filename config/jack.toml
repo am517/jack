@@ -17,6 +17,8 @@ sidecar_suffix = ".config"
 # output = "~/Movies/Sorted"
 
 # Show what would change instead of changing anything.
+# Media type: "auto" (guess from filename/ids), "tv" or "movie" (forces matcher and providers)
+type = "auto"
 dry_run = false
 download_only = false
 # Print composite metadata to stdout (no media changes unless combined with download_only)

@@ -49,10 +49,15 @@ pub struct Query {
     pub imdb: Option<String>,
     pub tmdb: Option<String>,
     pub thetvdb: Option<String>,
+    /// Forced type: Some("tv") / Some("movie"); None = guess.
+    pub kind: Option<String>,
 }
 
 impl Query {
     pub fn is_tv(&self) -> bool {
+        if let Some(k) = &self.kind {
+            return k == "tv";
+        }
         self.season.is_some() || self.thetvdb.is_some() || self.tmdb.as_deref().is_some_and(|t| t.contains("/tv/"))
     }
 }
@@ -184,12 +189,12 @@ impl Provider for Tmdb<'_> {
         "tmdb"
     }
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
-        let mut tv = q.is_tv() || q.tmdb.as_deref().is_some_and(|t| t.contains("/tv/"));
+        let mut tv = q.is_tv();
         let mut id = q.tmdb.as_deref().and_then(|t| digits_after(t, if t.contains('/') { "/movie/" } else { "" }).or_else(|| digits_after(t, "/tv/")));
         if id.is_none() {
             if let Some(tt) = q.imdb.as_deref().and_then(imdb_id) {
                 let r = self.get(&format!("/find/{tt}"), &[("external_source", "imdb_id".into())])?;
-                if let Some(x) = r["tv_results"][0]["id"].as_u64() {
+                if let Some(x) = r["tv_results"][0]["id"].as_u64().filter(|_| q.kind.as_deref() != Some("movie")) {
                     (tv, id) = (true, Some(x.to_string()));
                 } else {
                     id = r["movie_results"][0]["id"].as_u64().map(|x| x.to_string());
@@ -280,11 +285,38 @@ impl<'a> Tvdb<'a> {
     }
 }
 
+impl Tvdb<'_> {
+    /// Movie search (only when the type is forced to movie).
+    fn movie(&self, q: &Query) -> Result<Option<Meta>, String> {
+        let id = match q.thetvdb.as_deref().filter(|x| x.chars().all(|c| c.is_ascii_digit())) {
+            Some(x) => x.to_string(),
+            None if !q.title.is_empty() => {
+                let yr = q.year.as_ref().map(|y| format!("&year={}", enc(y))).unwrap_or_default();
+                let r = self.get(&format!("/search?type=movie&query={}{yr}", enc(&q.title)))?;
+                let Some(id) = s(&r[0]["tvdb_id"]) else { return Ok(None) };
+                id
+            }
+            None => return Ok(None),
+        };
+        let d = self.get(&format!("/movies/{id}"))?;
+        let mut m = Meta::new();
+        m.insert("kind".into(), "movie".into());
+        put(&mut m, "title", s(&d["name"]));
+        put(&mut m, "year", s(&d["year"]));
+        put(&mut m, "poster_url", s(&d["image"]));
+        put(&mut m, "thetvdb_id", Some(id));
+        Ok(Some(m))
+    }
+}
+
 impl Provider for Tvdb<'_> {
     fn name(&self) -> &'static str {
         "thetvdb"
     }
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+        if q.kind.as_deref() == Some("movie") {
+            return self.movie(q);
+        }
         if !q.is_tv() {
             return Ok(None);
         }
@@ -530,6 +562,31 @@ mod tests {
         let tv = Tvdb::new(TvdbCfg { api_key: "k".into(), base_url: "http://v".into(), image_language: "eng".into(), ..Default::default() }, &h);
         let m = tv.lookup(&Query { title: "S".into(), season: Some(1), episode: Some(1), ..Default::default() }).unwrap().unwrap();
         assert_eq!((m["backdrop_url"].as_str(), m["still_url"].as_str()), ("http://a/bg.jpg", "http://a/ep.jpg"));
+    }
+
+    #[test]
+    fn forced_type_picks_endpoints() {
+        // tv forced without SxxExx: TMDB /search/tv, OMDb type=series
+        let h = FakeHttp::new(vec![("/search/tv", json!({"results":[{"id":2}]})), ("/tv/2", json!({"name":"Cosmos"}))]);
+        let tvq = Query { title: "Cosmos".into(), kind: Some("tv".into()), ..Default::default() };
+        tmdb(&h).lookup(&tvq).unwrap().unwrap();
+        assert!(h.calls.borrow().iter().any(|c| c.contains("/search/tv?")));
+        let o = Omdb { cfg: OmdbCfg { api_key: "k".into(), base_url: "http://o/".into(), ..Default::default() }, http: &h };
+        let _ = o.lookup(&tvq);
+        assert!(h.calls.borrow().iter().any(|c| c.contains("type=series")));
+        // movie forced despite a thetvdb id: TMDB movie, find ignores tv_results, TheTVDB movie search
+        let h = FakeHttp::new(vec![
+            ("/find/tt1", json!({"movie_results":[{"id":7}],"tv_results":[{"id":8}]})),
+            ("/movie/7", json!({"title":"M"})),
+            ("/login", json!({"data":{"token":"T"}})),
+            ("/search", json!({"data":[{"tvdb_id":"5"}]})),
+            ("/movies/5", json!({"data":{"name":"M","year":"2001","image":"http://a/m.jpg"}})),
+        ]);
+        let mq = Query { title: "M".into(), imdb: Some("tt1".into()), kind: Some("movie".into()), ..Default::default() };
+        assert_eq!(tmdb(&h).lookup(&mq).unwrap().unwrap()["kind"], "movie");
+        let m = Tvdb::new(TvdbCfg { api_key: "k".into(), base_url: "http://v".into(), ..Default::default() }, &h).lookup(&mq).unwrap().unwrap();
+        assert_eq!((m["kind"].as_str(), m["year"].as_str(), m["thetvdb_id"].as_str()), ("movie", "2001", "5"));
+        assert!(h.calls.borrow().iter().any(|c| c.contains("/search?type=movie&query=M")));
     }
 
     #[test]

@@ -52,6 +52,9 @@ pub struct Settings {
     pub year: Option<String>,
     /// "poster" or "landscape" (overrides [tagger] art_style).
     pub art_style: Option<String>,
+    /// "tv", "movie" or "auto": forces the matcher and providers.
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
 }
 
 impl Settings {
@@ -77,6 +80,7 @@ impl Settings {
             name: self.name.or(l.name),
             year: self.year.or(l.year),
             art_style: self.art_style.or(l.art_style),
+            kind: self.kind.or(l.kind),
         }
     }
     pub fn flag(v: Option<bool>) -> bool {
