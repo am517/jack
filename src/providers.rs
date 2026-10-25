@@ -153,7 +153,7 @@ impl Provider for Tmdb<'_> {
         "tmdb"
     }
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
-        let mut tv = q.is_tv();
+        let mut tv = q.is_tv() || q.tmdb.as_deref().is_some_and(|t| t.contains("/tv/"));
         let mut id = q.tmdb.as_deref().and_then(|t| digits_after(t, if t.contains('/') { "/movie/" } else { "" }).or_else(|| digits_after(t, "/tv/")));
         if id.is_none() {
             if let Some(tt) = q.imdb.as_deref().and_then(imdb_id) {
@@ -174,7 +174,7 @@ impl Provider for Tmdb<'_> {
             id = r["results"][0]["id"].as_u64().map(|x| x.to_string());
         }
         let Some(id) = id else { return Ok(None) };
-        let d = self.get(&format!("/{}/{id}", if tv { "tv" } else { "movie" }), &[])?;
+        let d = self.get(&format!("/{}/{id}", if tv { "tv" } else { "movie" }), &[("append_to_response", "external_ids".into())])?;
         let mut m = Meta::new();
         let date = s(&d[if tv { "first_air_date" } else { "release_date" }]);
         put(&mut m, "year", date.as_ref().map(|x| x.chars().take(4).collect()));
@@ -182,7 +182,9 @@ impl Provider for Tmdb<'_> {
         put(&mut m, "genre", s(&d["genres"][0]["name"]));
         put(&mut m, "poster_url", self.img(&d["poster_path"]));
         put(&mut m, "tmdb_id", Some(id.clone()));
+        put(&mut m, "imdb_id", s(&d["imdb_id"]).or_else(|| s(&d["external_ids"]["imdb_id"])));
         if tv {
+            put(&mut m, "tmdb_series_id", Some(id.clone()));
             m.insert("kind".into(), "episode".into());
             put(&mut m, "show", s(&d["name"]));
             put(&mut m, "title", s(&d["name"]));
@@ -193,6 +195,7 @@ impl Provider for Tmdb<'_> {
                 put(&mut m, "episode_title", s(&e["name"]));
                 put(&mut m, "description", s(&e["overview"]));
                 put(&mut m, "date", s(&e["air_date"]));
+                put(&mut m, "tmdb_episode_id", s(&e["id"]));
             }
         } else {
             m.insert("kind".into(), "movie".into());
@@ -262,6 +265,7 @@ impl Provider for Tvdb<'_> {
         put(&mut m, "description", s(&series["overview"]));
         put(&mut m, "poster_url", s(&series["image"]));
         put(&mut m, "thetvdb_id", Some(id.clone()));
+        put(&mut m, "thetvdb_series_id", Some(id.clone()));
         if let (Some(se), Some(ep)) = (q.season, q.episode) {
             let r = self.get(&format!("/series/{id}/episodes/default?page=0&season={se}&episodeNumber={ep}"))?;
             let e = &r["episodes"][0];
@@ -270,6 +274,7 @@ impl Provider for Tvdb<'_> {
             put(&mut m, "episode_title", s(&e["name"]));
             put(&mut m, "description", s(&e["overview"]));
             put(&mut m, "date", s(&e["aired"]));
+            put(&mut m, "thetvdb_episode_id", s(&e["id"]));
         }
         Ok(Some(m))
     }
@@ -333,13 +338,14 @@ mod tests {
     fn tmdb_tv_search_and_episode() {
         let h = FakeHttp::new(vec![
             ("/search/tv", json!({"results":[{"id":42}]})),
-            ("/tv/42/season/1/episode/2", json!({"name":"Ep Two","air_date":"2016-07-11","overview":"o"})),
-            ("/tv/42", json!({"name":"Saiki K","first_air_date":"2016-07-04"})),
+            ("/tv/42/season/1/episode/2", json!({"id":4202,"name":"Ep Two","air_date":"2016-07-11","overview":"o"})),
+            ("/tv/42", json!({"name":"Saiki K","first_air_date":"2016-07-04","external_ids":{"imdb_id":"tt5"}})),
         ]);
         let q = Query { title: "Saiki K".into(), season: Some(1), episode: Some(2), ..Default::default() };
         let m = tmdb(&h).lookup(&q).unwrap().unwrap();
         assert_eq!((m["show"].as_str(), m["episode_title"].as_str(), m["season"].as_str()), ("Saiki K", "Ep Two", "1"));
         assert!(h.calls.borrow().iter().any(|c| c.contains("query=Saiki%20K")));
+        assert_eq!((m["tmdb_series_id"].as_str(), m["tmdb_episode_id"].as_str(), m["imdb_id"].as_str()), ("42", "4202", "tt5"));
     }
 
     #[test]

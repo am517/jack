@@ -36,6 +36,8 @@ mp4_tool = "atomicparsley"
 atomicparsley = "AtomicParsley"
 exiftool = "exiftool"
 mkvpropedit = "mkvpropedit"
+# Used to read MKV tags back (ids from earlier runs).
+mkvextract = "mkvextract"
 mp4_extensions = ["mp4", "m4v", "mov"]
 mkv_extensions = ["mkv"]
 # Embed downloaded poster art when tagging.
@@ -45,6 +47,29 @@ short_description_max = 250
 
 # Saved poster art: "<filename><poster_suffix>" (used by --download-only and embedding).
 poster_suffix = ".poster.jpg"
+
+# Database ids are written into the file and read back on later runs (preferred over the
+# filename guess; flags/sidecar ids still win). Keys are metadata ids, values are tag names.
+# MP4: iTunes freeform atoms "----:<id_domain>:<name>" (written with AtomicParsley --rDNSatom;
+# exiftool can't write these, so with mp4_tool = "exiftool" ids are still written by AtomicParsley).
+id_domain = "com.apple.iTunes"
+[tagger.mp4_id_tags]
+imdb_id = "IMDB_ID"
+tmdb_id = "TMDB_ID"
+thetvdb_id = "TVDB_ID"
+tmdb_series_id = "TMDB_SERIES_ID"
+tmdb_episode_id = "TMDB_EPISODE_ID"
+thetvdb_series_id = "TVDB_SERIES_ID"
+thetvdb_episode_id = "TVDB_EPISODE_ID"
+# MKV: global simple tags (mkvpropedit --tags global:..., replaces existing global tags).
+[tagger.mkv_id_tags]
+imdb_id = "IMDB"
+tmdb_id = "TMDB"
+thetvdb_id = "TVDB"
+tmdb_series_id = "TMDB_SERIES"
+tmdb_episode_id = "TMDB_EPISODE"
+thetvdb_series_id = "TVDB_SERIES"
+thetvdb_episode_id = "TVDB_EPISODE"
 
 [providers]
 # Providers to query, in order. (IMDb ids given with --imdb are resolved through TMDB.)

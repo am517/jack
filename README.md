@@ -43,6 +43,9 @@ jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then 
 
 Packaging: see `packaging/homebrew/` (draft formula for the shared Windups tap).
 
+Database ids (IMDb/TMDB/TheTVDB, plus series/episode ids for TV) are written into the file
+(MP4 iTunes freeform atoms, MKV global tags) and read back on later runs, so re-tagging skips
+the filename guess. Tag names are under `[tagger.mp4_id_tags]` / `[tagger.mkv_id_tags]`.
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:

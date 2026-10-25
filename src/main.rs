@@ -92,9 +92,12 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
 /// Query from the filename plus ids from flags/sidecar.
 fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
     let mut q = matcher::parse(path, &cfg.matching)?;
-    q.imdb = s.imdb.clone();
-    q.tmdb = s.tmdb.clone();
-    q.thetvdb = s.thetvdb.clone();
+    // ids written by an earlier run beat the filename guess; flags/sidecar/config ids beat both.
+    let f = tagger::read_ids(path, &cfg.tagger);
+    let g = |k: &str| f.get(k).cloned();
+    q.imdb = s.imdb.clone().or(g("imdb_id"));
+    q.tmdb = s.tmdb.clone().or(g("tmdb_series_id").map(|x| format!("/tv/{x}"))).or(g("tmdb_id"));
+    q.thetvdb = s.thetvdb.clone().or(g("thetvdb_series_id")).or(g("thetvdb_id"));
     if let Some(n) = s.name.as_ref().filter(|n| !n.is_empty()) {
         q.title = n.clone();
     }
@@ -164,10 +167,16 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         let _ = writeln!(out, "    save metadata: {}", mp.display());
         return Ok(());
     }
+    let mut meta = meta;
+    if let Some(i) = s.imdb.as_deref().and_then(providers::imdb_id) {
+        meta.entry("imdb_id".into()).or_insert(i);
+    }
     let cmd = tagger::command(path, &meta, &cfg.tagger)?;
-    let _ = writeln!(out, "    tag: {}", tagger::show(&cmd));
-    if !dry {
-        tagger::run(&cmd)?;
+    for c in std::iter::once(cmd).chain(tagger::extra_commands(path, &meta, &cfg.tagger)) {
+        let _ = writeln!(out, "    tag: {}", tagger::show(&c));
+        if !dry {
+            tagger::run(&c)?;
+        }
     }
     if let Some(root) = &s.output {
         let to = sorter::destination(root, path, &meta, &cfg.sort);
@@ -268,6 +277,24 @@ mod tests {
         assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune Part One", Some("2021"))); // sidecar name, flag year
         let q = query(&m, &Settings::default(), &cfg).unwrap();
         assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune", Some("2021")));
+    }
+
+    #[test]
+    fn ids_in_file_beat_filename_but_not_flags() {
+        let ok = |t: &str| std::process::Command::new("which").arg(t).output().is_ok_and(|o| o.status.success());
+        if !ok("ffmpeg") || !ok("AtomicParsley") {
+            return eprintln!("skip: ffmpeg/AtomicParsley missing");
+        }
+        let d = tempfile::tempdir().unwrap();
+        let m = d.path().join("Saiki.K.S01E02.mp4");
+        assert!(std::process::Command::new("ffmpeg").args(["-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.2", "-c:v", "mpeg4"]).arg(&m).status().unwrap().success());
+        let cfg = config::load(Some(Path::new("config/jack.toml"))).unwrap();
+        let ids: Meta = [("tmdb_series_id", "42"), ("thetvdb_series_id", "7"), ("imdb_id", "tt5")].map(|(k, v)| (k.to_string(), v.to_string())).into();
+        tagger::run(&tagger::command(&m, &ids, &cfg.tagger).unwrap()).unwrap();
+        let q = query(&m, &Settings::default(), &cfg).unwrap();
+        assert_eq!((q.tmdb.as_deref(), q.thetvdb.as_deref(), q.imdb.as_deref()), (Some("/tv/42"), Some("7"), Some("tt5")));
+        let s = Settings { thetvdb: Some("99".into()), ..Default::default() };
+        assert_eq!(query(&m, &s, &cfg).unwrap().thetvdb.as_deref(), Some("99"));
     }
 
     #[test]

@@ -82,6 +82,13 @@ pub struct TaggerCfg {
     pub mkv_extensions: Vec<String>,
     pub embed_artwork: bool,
     pub short_description_max: usize,
+    pub mkvextract: String,
+    /// rDNS domain ("mean") for MP4 freeform id atoms.
+    pub id_domain: String,
+    /// Metadata id key -> MP4 freeform atom name.
+    pub mp4_id_tags: std::collections::BTreeMap<String, String>,
+    /// Metadata id key -> MKV simple tag name.
+    pub mkv_id_tags: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -149,7 +156,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
         }
     }
     let mut c: Config = v.try_into().map_err(|e| format!("config: {e}"))?;
-    for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit] {
+    for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract] {
         expand_s(s);
     }
     apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY);

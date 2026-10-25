@@ -17,6 +17,46 @@ fn eq(a: &mut Vec<String>, tag: &str, v: Option<&String>) {
     }
 }
 
+/// (tag name, value) for every configured id present in `m`.
+fn ids<'a>(m: &'a Meta, names: &'a std::collections::BTreeMap<String, String>) -> Vec<(&'a str, &'a str)> {
+    names
+        .iter()
+        .filter_map(|(k, n)| m.get(k).filter(|v| !v.is_empty()).map(|v| (n.as_str(), v.as_str())))
+        .collect()
+}
+
+fn rdns(a: &mut Vec<String>, m: &Meta, cfg: &TaggerCfg) {
+    for (n, v) in ids(m, &cfg.mp4_id_tags) {
+        a.extend(["--rDNSatom".into(), v.into(), format!("name={n}"), format!("domain={}", cfg.id_domain)]);
+    }
+}
+
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Matroska tags XML (global target) for the ids in `m`, or None if there are none.
+pub fn mkv_tags_xml(m: &Meta, cfg: &TaggerCfg) -> Option<String> {
+    let v = ids(m, &cfg.mkv_id_tags);
+    if v.is_empty() {
+        return None;
+    }
+    let mut x = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Tags><Tag><Targets/>");
+    for (n, s) in v {
+        x += &format!("<Simple><Name>{}</Name><String>{}</String></Simple>", xml(n), xml(s));
+    }
+    Some(x + "</Tag></Tags>\n")
+}
+
+/// Extra commands to run after `command` (ids via AtomicParsley when exiftool is the MP4 writer,
+/// since exiftool can't write iTunes freeform atoms).
+pub fn extra_commands(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Vec<Vec<String>> {
+    let mut a = vec![cfg.atomicparsley.clone(), file.to_string_lossy().into_owned(), "--overWrite".into()];
+    rdns(&mut a, m, cfg);
+    let exif = cfg.mp4_tool.eq_ignore_ascii_case("exiftool");
+    if exif && a.len() > 3 && has_ext(file, &cfg.mp4_extensions) { vec![a] } else { vec![] }
+}
+
 /// The argv to tag `file` with `m`.
 pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, String> {
     let f = file.to_string_lossy().into_owned();
@@ -39,6 +79,12 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
             }
             a.push(p.clone());
         }
+        if let Some(x) = mkv_tags_xml(m, cfg) {
+            let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let tp = std::env::temp_dir().join(format!("jack-{}-{name}.tags.xml", std::process::id()));
+            std::fs::write(&tp, x).map_err(|e| format!("{}: {e}", tp.display()))?;
+            a.extend(["--tags".into(), format!("global:{}", tp.display())]);
+        }
     } else if has_ext(file, &cfg.mp4_extensions) {
         match cfg.mp4_tool.to_ascii_lowercase().as_str() {
             "atomicparsley" => {
@@ -58,6 +104,7 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
                     kv(&mut a, "--tracknum", m.get("episode"));
                 }
                 kv(&mut a, "--artwork", art);
+                rdns(&mut a, m, cfg);
             }
             "exiftool" => {
                 a.extend([cfg.exiftool.clone(), "-overwrite_original".into()]);
@@ -85,11 +132,57 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
     Ok(a)
 }
 
+fn output(argv: &[&str]) -> Option<String> {
+    let o = Command::new(argv[0]).args(&argv[1..]).output().ok()?;
+    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// Ids previously written into `file` (empty if none, or the reader tool is missing).
+pub fn read_ids(file: &Path, cfg: &TaggerCfg) -> Meta {
+    let f = file.to_string_lossy();
+    let mut found: Vec<(String, String)> = vec![];
+    let names = if has_ext(file, &cfg.mkv_extensions) {
+        if let Some(x) = output(&[&cfg.mkvextract, &f, "tags", "-"]) {
+            let re = regex::Regex::new(r"(?s)<Simple>\s*<Name>([^<]*)</Name>\s*<String>([^<]*)</String>").unwrap();
+            found = re.captures_iter(&x).map(|c| (c[1].to_string(), c[2].replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))).collect();
+        }
+        &cfg.mkv_id_tags
+    } else if has_ext(file, &cfg.mp4_extensions) {
+        if cfg.mp4_tool.eq_ignore_ascii_case("exiftool") {
+            if let Some(j) = output(&[&cfg.exiftool, "-j", "-iTunes:all", &f]) {
+                if let Ok(serde_json::Value::Array(v)) = serde_json::from_str(&j) {
+                    if let Some(serde_json::Value::Object(o)) = v.first() {
+                        found = o.iter().map(|(k, v)| (k.clone(), v.as_str().map_or_else(|| v.to_string(), String::from))).collect();
+                    }
+                }
+            }
+        } else if let Some(x) = output(&[&cfg.atomicparsley, &f, "-t"]) {
+            let pre = format!("Atom \"----\" [{};", cfg.id_domain);
+            for l in x.lines() {
+                if let Some((n, v)) = l.strip_prefix(&pre).and_then(|r| r.split_once("] contains: ")) {
+                    found.push((n.to_string(), v.trim().to_string()));
+                }
+            }
+        }
+        &cfg.mp4_id_tags
+    } else {
+        return Meta::new();
+    };
+    names
+        .iter()
+        .filter_map(|(k, n)| found.iter().find(|(fname, _)| fname == n).map(|(_, v)| (k.clone(), v.clone())))
+        .filter(|(_, v)| !v.is_empty())
+        .collect()
+}
+
 pub fn run(argv: &[String]) -> Result<(), String> {
     let out = Command::new(&argv[0])
         .args(&argv[1..])
         .output()
         .map_err(|e| format!("{}: {e} (install it, e.g. `brew install atomicparsley exiftool mkvtoolnix`, or set its path under [tagger])", argv[0]))?;
+    for t in argv.iter().filter_map(|x| x.strip_prefix("global:")).filter(|x| x.ends_with(".tags.xml")) {
+        let _ = std::fs::remove_file(t); // temp tags file from `command`
+    }
     if out.status.success() {
         Ok(())
     } else {
@@ -180,6 +273,56 @@ mod tests {
     fn read_title(p: &Path) -> String {
         let o = Command::new("exiftool").args(["-s3", "-Title"]).arg(p).output().unwrap();
         String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+
+    fn ids_meta(mut m: Meta) -> Meta {
+        for (k, v) in [("imdb_id", "tt0133093"), ("tmdb_id", "603"), ("tmdb_episode_id", "77"), ("thetvdb_series_id", "7")] {
+            m.insert(k.into(), v.into());
+        }
+        m
+    }
+
+    #[test]
+    fn id_args_and_xml() {
+        let c = show(&command(Path::new("a.mp4"), &ids_meta(movie()), &cfg()).unwrap());
+        assert!(c.contains("--rDNSatom tt0133093 name=IMDB_ID domain=com.apple.iTunes"), "{c}");
+        assert!(c.contains("--rDNSatom 77 name=TMDB_EPISODE_ID"));
+        let x = mkv_tags_xml(&ids_meta(movie()), &cfg()).unwrap();
+        assert!(x.contains("<Name>IMDB</Name><String>tt0133093</String>") && x.contains("<Name>TVDB_SERIES</Name>"));
+        assert!(mkv_tags_xml(&movie(), &cfg()).is_none());
+        let mut t = cfg();
+        t.mp4_tool = "exiftool".into();
+        assert_eq!(extra_commands(Path::new("a.mp4"), &ids_meta(movie()), &t).len(), 1);
+        assert!(extra_commands(Path::new("a.mp4"), &movie(), &t).is_empty());
+        assert!(extra_commands(Path::new("a.mp4"), &ids_meta(movie()), &cfg()).is_empty());
+    }
+
+    /// Integration: write ids into real ffmpeg-made MP4/MKV files with each writer, then read them back.
+    #[test]
+    fn integration_ids_roundtrip() {
+        let mut t = cfg();
+        for (ext, mp4, tools) in [("mp4", "atomicparsley", &["AtomicParsley"][..]), ("mp4", "exiftool", &["exiftool", "AtomicParsley"]), ("mkv", "", &["mkvpropedit", "mkvextract"])] {
+            if !tools.iter().all(|x| have(x)) {
+                eprintln!("skip ids {ext}/{mp4}: tools missing");
+                continue;
+            }
+            let Some((_d, p)) = make(ext) else { continue };
+            if !mp4.is_empty() {
+                t.mp4_tool = mp4.into();
+            }
+            let m = ids_meta(movie());
+            assert!(read_ids(&p, &t).is_empty());
+            run(&command(&p, &m, &t).unwrap()).unwrap();
+            for c in extra_commands(&p, &m, &t) {
+                run(&c).unwrap();
+            }
+            let r = read_ids(&p, &t);
+            assert_eq!(r.get("imdb_id").map(String::as_str), Some("tt0133093"), "{ext}/{mp4}: {r:?}");
+            assert_eq!(r.get("tmdb_id").map(String::as_str), Some("603"));
+            assert_eq!(r.get("tmdb_episode_id").map(String::as_str), Some("77"));
+            assert_eq!(r.get("thetvdb_series_id").map(String::as_str), Some("7"));
+            assert_eq!(r.len(), 4);
+        }
     }
 
     /// Integration: runs only when ffmpeg + the tag tool + exiftool (reader) are installed.
