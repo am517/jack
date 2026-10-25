@@ -121,7 +121,8 @@ pub struct TaggerCfg {
     pub ask_art: bool,
     pub ask_art_max: usize,
     /// macOS: open the candidates folder with ask_art_open_command.
-    pub ask_art_open_folder: bool,
+    /// Unset: true on macOS, false elsewhere.
+    pub ask_art_open_folder: Option<bool>,
     pub ask_art_open_command: String,
     /// Keep the candidates folder (always kept with -d).
     pub ask_art_keep: bool,

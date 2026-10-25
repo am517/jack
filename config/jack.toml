@@ -51,12 +51,15 @@ mkv_extensions = ["mkv"]
 # Artwork (like iVI4): on every normal run the poster is downloaded and embedded
 # (MP4 covr atom, replacing any existing art; MKV attachment, replacing an existing one).
 embed_artwork = true
-# --ask-art: download every art candidate (style + fallback, all providers) into a folder named after
-# the media file, list them (stderr) and ask which to embed (Enter = #1, s = skip; non-TTY uses #1).
+# --ask-art: fetch the full image lists (TMDB /images for movie/series/season/episode in the primary +
+# original language and untagged; TheTVDB extended artworks; OMDb poster), download them into a folder
+# named after the media file, list them (provider, kind, language, size; stderr) and ask which to embed
+# (Enter = #1, s = skip; non-TTY uses #1). Order: style (+ fallback), [merge] provider preference,
+# language, resolution. The extra requests happen only with --ask-art.
 ask_art = false
 ask_art_max = 20
-# macOS only: open the folder (with this command) while asking.
-ask_art_open_folder = true
+# Open the folder (with this command) while asking. Unset: true on macOS, false elsewhere.
+# ask_art_open_folder = true
 ask_art_open_command = "open"
 # Keep the folder afterwards (always kept with -d).
 ask_art_keep = false
@@ -224,11 +227,19 @@ folder_language = "en"
 max_component_bytes = 255
 
 [sort]
-# Used only when an output root is set (--output or `output` above). Paths are relative to it.
+# Files are moved/copied ONLY when sorting is on: --output/-o (or `output` above), or enabled = true.
+# Without either, jack only tags in place (the default). --dry-run prints the target without moving.
+enabled = false
+# Roots for a leading {tv_root} / {movie_root} (~ expanded). -o replaces both.
+tv_root = "~/TV"
+movie_root = "~/Movies"
 # Placeholders: {title} {year} {show} {season} {episode} {episode_title} {original_title} {original_show}
 # {original_episode_title} {ext} (any metadata key); {season:02} zero-pads. Empty " - {x}" parts are dropped.
-movie_template = "Movies/{title} ({year})/{title} ({year}).{ext}"
-tv_template = "TV/{show}/Season {season:02}/{show} - S{season:02}E{episode:02} - {episode_title}.{ext}"
+# {show} {title} {episode_title} follow [naming] (folder_language in folders, file_language in the file name);
+# {show_en} {title_en} {episode_title_en}: primary [providers] language; {*_file} / {*_folder}: per
+# file_language / folder_language anywhere. {show_year}: the show's first-aired year.
+movie_template = "{movie_root}/{title_en}/{title_file} ({year}).{ext}"
+tv_template = "{tv_root}/{show_en} ({show_year})/Season {season}/{show_file} S{season:02}E{episode:02} - {episode_title_file}.{ext}"
 # "move" or "copy".
 mode = "move"
 # Characters not allowed in file names, and what replaces them.

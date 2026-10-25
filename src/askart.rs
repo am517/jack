@@ -38,26 +38,42 @@ fn with_ui<R>(f: impl FnOnce(&mut Ui) -> R) -> R {
     })
 }
 
-pub struct Cand {
-    pub provider: String,
-    pub kind: &'static str,
-    pub url: String,
+pub use crate::providers::Img as Cand;
+
+fn key_of(kind: &str) -> &'static str {
+    match kind {
+        "backdrop" => "backdrop_url",
+        "still" => "still_url",
+        "season" => "season_poster_url",
+        _ => "poster_url",
+    }
 }
 
-/// Candidates in preference order: style order x keys (as art_url) x providers; deduped, capped.
-pub fn candidates(found: &[(String, Meta)], keys: &[&str], max: usize) -> Vec<Cand> {
-    let mut v: Vec<Cand> = vec![];
+/// Candidates: the found art URLs plus `extra` (full image lists), ordered by style key (as art_url),
+/// then provider preference for that key, then language (primary, original, untagged, other), then
+/// resolution; deduped by file name, capped at `max`.
+pub fn candidates(found: &[(String, Meta)], extra: Vec<Cand>, keys: &[&str], prefs: impl Fn(&str) -> Vec<String>, max: usize) -> Vec<Cand> {
+    let mut all: Vec<Cand> = vec![];
     for k in keys {
         for (p, m) in found {
-            if let Some(u) = m.get(*k).filter(|u| !u.is_empty() && !v.iter().any(|c| &c.url == *u)) {
-                let kind = match *k {
-                    "backdrop_url" => "backdrop",
-                    "still_url" => "still",
-                    "season_poster_url" => "season",
-                    _ => "poster",
-                };
-                v.push(Cand { provider: p.clone(), kind, url: u.clone() });
+            if let Some(u) = m.get(*k).filter(|u| !u.is_empty()) {
+                let kind = ["backdrop", "still", "season", "poster"].into_iter().find(|x| key_of(x) == *k).unwrap();
+                all.push(Cand { provider: p.clone(), kind, url: u.clone(), lang: String::new(), lrank: 2, w: 0, h: 0 });
             }
+        }
+    }
+    all.extend(extra.into_iter().filter(|c| keys.contains(&key_of(c.kind))));
+    let rank = |c: &Cand| {
+        let k = key_of(c.kind);
+        let pr = prefs(k).iter().position(|p| *p == c.provider).unwrap_or(usize::MAX);
+        (keys.iter().position(|x| *x == k), pr, c.lrank, std::cmp::Reverse(c.w * c.h))
+    };
+    all.sort_by_key(rank);
+    let name = |u: &str| u.rsplit('/').next().unwrap_or(u).to_string();
+    let mut v: Vec<Cand> = vec![];
+    for c in all {
+        if !v.iter().any(|x| name(&x.url) == name(&c.url)) {
+            v.push(c);
         }
     }
     v.truncate(max.max(1));
@@ -102,7 +118,9 @@ pub fn ask(media: &Path, poster: &Path, cands: &[Cand], http: &dyn Http, o: &Opt
     let mut list = format!("{}: {} image(s) in {}\n", media.display(), got.len(), dir.display());
     for (i, (f, c)) in got.iter().enumerate() {
         let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
-        let _ = writeln!(list, "  {:>2}. {:<8} {:<8} {} bytes  {}", i + 1, c.provider, c.kind, size, f.file_name().unwrap().to_string_lossy());
+        let dim = if c.w > 0 { format!("{}x{}", c.w, c.h) } else { format!("{size} bytes") };
+        let lang = if c.lang.is_empty() { "-" } else { &c.lang };
+        let _ = writeln!(list, "  {:>2}. {:<8} {:<8} {:<4} {:<12} {}", i + 1, c.provider, c.kind, lang, dim, f.file_name().unwrap().to_string_lossy());
     }
     let pick = with_ui(|ui| {
         ui.say(&list);
@@ -152,4 +170,23 @@ pub fn ask(media: &Path, poster: &Path, cands: &[Cand], http: &dyn Http, o: &Opt
         let _ = std::fs::remove_dir(&dir); // only if now empty
     }
     Ok(chosen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordering_dedupe_cap() {
+        let c = |p: &str, kind: &'static str, url: &str, lrank: u8, w: u64| Cand { provider: p.into(), kind, url: url.into(), lang: String::new(), lrank, w, h: w };
+        let found = vec![("tmdb".to_string(), [("poster_url".to_string(), "http://i/w780/a.jpg".to_string())].into_iter().collect::<Meta>()), ("omdb".to_string(), [("poster_url".to_string(), "http://o/x.jpg".to_string())].into_iter().collect())];
+        let extra = vec![c("tmdb", "poster", "http://i/original/lo.jpg", 0, 100), c("tmdb", "poster", "http://i/original/a.jpg", 0, 2000), c("thetvdb", "poster", "http://v/t.jpg", 0, 9000), c("tmdb", "poster", "http://i/original/ja.jpg", 1, 9000), c("tmdb", "backdrop", "http://i/original/b.jpg", 0, 9000), c("tmdb", "still", "http://i/original/s.jpg", 0, 9000)];
+        let prefs = |_: &str| vec!["tmdb".to_string(), "thetvdb".to_string(), "omdb".to_string()];
+        let v = candidates(&found, extra.clone(), &["poster_url", "backdrop_url"], prefs, 20);
+        let urls: Vec<_> = v.iter().map(|c| c.url.rsplit('/').next().unwrap()).collect();
+        // style key, then provider preference, then language, then resolution; a.jpg deduped (bigger kept); still not in style
+        assert_eq!(urls, vec!["a.jpg", "lo.jpg", "ja.jpg", "t.jpg", "x.jpg", "b.jpg"]);
+        assert_eq!(v[0].w, 2000);
+        assert_eq!(candidates(&found, extra, &["poster_url"], prefs, 2).len(), 2);
+    }
 }

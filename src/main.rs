@@ -194,7 +194,7 @@ fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
 }
 
 /// Composite metadata from all providers in [providers] order, merged per [merge].
-fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(Meta, Vec<(String, Meta)>), String> {
+fn provider_cfgs(cfg: &Config) -> (providers::TmdbCfg, providers::TvdbCfg) {
     let pc = &cfg.providers;
     let mut tc = pc.tmdb.clone();
     tc.keep_original = pc.keep_original;
@@ -206,6 +206,26 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(
     if vc.language.is_empty() {
         vc.language = pc.language_codes.get(&pc.language).cloned().unwrap_or_else(|| pc.language.clone());
     }
+    (tc, vc)
+}
+
+/// --ask-art only: full image lists from TMDB and TheTVDB for the providers that matched.
+fn all_images(found: &[(String, Meta)], cfg: &Config, http: &dyn Http) -> Vec<askart::Cand> {
+    let (tc, vc) = provider_cfgs(cfg);
+    let mut v = vec![];
+    for (p, m) in found {
+        match p.as_str() {
+            "tmdb" => v.extend(Tmdb { cfg: tc.clone(), http }.images(m)),
+            "thetvdb" => v.extend(Tvdb::new(vc.clone(), http).images(m)),
+            _ => {}
+        }
+    }
+    v
+}
+
+fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(Meta, Vec<(String, Meta)>), String> {
+    let pc = &cfg.providers;
+    let (tc, vc) = provider_cfgs(cfg);
     let tmdb = Tmdb { cfg: tc, http };
     let tvdb = Tvdb::new(vc, http);
     let omdb = Omdb { cfg: cfg.providers.omdb.clone(), http };
@@ -331,9 +351,10 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
             let (mut m, found) = fetch(&query(path, s, cfg)?, cfg, http, out)?;
             let t = &cfg.tagger;
             if !dry && t.ask_art && (dl || (t.embed_artwork && !print)) {
-                let c = askart::candidates(&found, &art_keys(&m, s, cfg), t.ask_art_max);
+                let prefs = |k: &str| cfg.merge.fields.get(k).unwrap_or(&cfg.merge.default).clone();
+                let c = askart::candidates(&found, all_images(&found, cfg, http), &art_keys(&m, s, cfg), prefs, t.ask_art_max);
                 let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
-                let open = (cfg!(target_os = "macos") && t.ask_art_open_folder && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
+                let open = (t.ask_art_open_folder.unwrap_or(cfg!(target_os = "macos")) && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
                 let o = askart::Opts { open_cmd: open, keep: dl || t.ask_art_keep };
                 match askart::ask(path, &pp, &c, http, &o, out) {
                     Ok(Some(p)) => {
@@ -384,8 +405,8 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
             tagger::run(&c)?;
         }
     }
-    if let Some(root) = &s.output {
-        let to = sorter::destination(root, path, &meta, &cfg.sort, &cfg.naming);
+    if s.output.is_some() || cfg.sort.enabled {
+        let to = sorter::destination(s.output.as_deref(), path, &meta, &cfg.sort, &cfg.naming);
         let _ = writeln!(out, "    {}: {}", cfg.sort.mode, to.display());
         if !dry {
             sorter::apply(path, &to, &cfg.sort)?;
@@ -895,9 +916,10 @@ mod tests {
         assert_eq!(failed, 0, "{out}");
         assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
         assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
+        assert!(!out.contains("move:"), "no sorting without -o / [sort] enabled: {out}");
         let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap(), "-o", "/srt"]);
         let (out, _, _) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
-        assert!(out.contains("move: /srt/Movies/The Matrix (1999)/The Matrix (1999).m4v"), "{out}");
+        assert!(out.contains("move: /srt/The Matrix/The Matrix (1999).m4v"), "{out}");
         assert!(!Path::new("/srt").exists());
         assert_eq!(fs::read(&m).unwrap(), b"x"); // untouched
     }
@@ -1068,7 +1090,7 @@ mod tests {
         assert!(out.contains("warning: artwork:"), "art failure is a warning: {out}"); // and meta.json was still saved (loaded above)
         assert!(p.contains("original_show: 薬屋のひとりごと"), "{p}");
         let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out"]), &h).unwrap();
-        assert!(out.contains("/out/TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗害.mp4"), "{out}");
+        assert!(out.contains("/out/The Apothecary Diaries (2023)/Season 3/薬屋のひとりごと S03E01 - 蝗害.mp4"), "{out}");
     }
 
     fn ui(input: &str, tty: bool) {
@@ -1099,8 +1121,10 @@ mod tests {
         let folder = d.path().join("The.Matrix.1999");
         // without --ask-art: unchanged (no prompt, no folder)
         ui("", true);
-        let (out, _, _) = run(&cli(&["--config", cs, ms]), &h()).unwrap();
+        let plain = h();
+        let (out, _, _) = run(&cli(&["--config", cs, ms]), &plain).unwrap();
         assert!(!out.contains("ask-art") && ui_log().is_empty() && !folder.exists(), "{out}");
+        assert!(!plain.calls.borrow().iter().any(|c| c.contains("/images")), "no image-list requests without --ask-art");
         // Enter = #1; listed in preference order (posters by provider, then fallback backdrop); folder removed; embedded
         ui("\n", true);
         let (out, _, failed) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();

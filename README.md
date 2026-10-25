@@ -72,9 +72,18 @@ with a warning.
 - Genres from every provider are merged, deduped, alphabetized and written as one string (`genre_case = "lower"`, `genre_separator = ","` under `[providers]`), e.g. `animation,comedy,family`.
 - `--grouping <text>` (or `grouping = "..."` in a sidecar/config) writes iTunes Grouping (MP4 ©grp, MKV GROUPING).
 
+### Sorting / renaming
+
+**Files are only moved when sorting is on:** `-o DIR` (or `output` in config), or `[sort] enabled = true`. Otherwise jack tags in place. `--dry-run` prints the target (`move: ...`) without touching anything. Default templates:
+
+- TV: `{tv_root}/{show_en} ({show_year})/Season {season}/{show_file} S{season:02}E{episode:02} - {episode_title_file}.{ext}` → `~/TV/The Apothecary Diaries (2023)/Season 3/薬屋のひとりごと S03E01 - 蝗.mp4`
+- Movie: `{movie_root}/{title_en}/{title_file} ({year}).{ext}` → `~/Movies/Evolution/Evolution (2001).mp4`
+
+`tv_root` / `movie_root` default to `~/TV` / `~/Movies`; `-o` replaces both. `_en` = primary language, `_file` / `_folder` = `[naming]` languages; `{x:02}` zero-pads.
+
 ### Choosing art (`--ask-art`)
 
-`--ask-art` downloads every art candidate (your art style plus its fallback, from all providers, up to `ask_art_max`) into a folder named after the media file (e.g. `Evolution.2001/01.jpg`, `02.jpg`, ...), lists them on stderr, opens the folder on macOS, and asks which to embed: a number, Enter for #1, or `s` to skip. Without a terminal it uses #1. The folder is deleted afterwards unless `-d` or `ask_art_keep = true`. Save as default with `--set --ask-art`; undo with `--no-ask-art`.
+`--ask-art` fetches the full image lists (TMDB posters/backdrops/season posters/stills in your language, the original language and untagged; TheTVDB artworks; the OMDb poster), orders them by art style, `[merge]` provider preference, language and resolution, and downloads up to `ask_art_max` into a folder named after the media file (e.g. `Evolution.2001/01.jpg`, `02.jpg`, ...), lists them on stderr (provider, kind, language, width x height), opens the folder (default on macOS only; `ask_art_open_folder`), and asks which to embed: a number, Enter for #1, or `s` to skip. Without a terminal it uses #1. The folder is deleted afterwards unless `-d` or `ask_art_keep = true`. Save as default with `--set --ask-art`; undo with `--no-ask-art`.
 
 ## API keys
 
