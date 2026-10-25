@@ -1,3 +1,4 @@
+mod askart;
 mod config;
 mod matcher;
 mod meta;
@@ -93,6 +94,11 @@ struct Cli {
     #[arg(long, overrides_with = "recursive")]
     no_recursive: bool,
     /// Embed artwork into media (default)
+    /// Download all art candidates, list them, and ask which to embed
+    #[arg(long, overrides_with = "no_ask_art")]
+    ask_art: bool,
+    #[arg(long, overrides_with = "ask_art")]
+    no_ask_art: bool,
     #[arg(long, overrides_with = "no_embed_artwork")]
     embed_artwork: bool,
     #[arg(long, overrides_with = "embed_artwork")]
@@ -188,7 +194,7 @@ fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
 }
 
 /// Composite metadata from all providers in [providers] order, merged per [merge].
-fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<Meta, String> {
+fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(Meta, Vec<(String, Meta)>), String> {
     let pc = &cfg.providers;
     let mut tc = pc.tmdb.clone();
     tc.keep_original = pc.keep_original;
@@ -250,16 +256,21 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
             m.insert("description".into(), format!("{d}\n\nOriginal title: {o}"));
         }
     }
-    Ok(m)
+    Ok((m, found))
 }
 
 /// The art URL for the effective style (flag > sidecar > [tagger] art_style), with fallbacks.
 fn art_url(meta: &Meta, s: &Settings, cfg: &Config) -> Option<String> {
+    art_keys(meta, s, cfg).into_iter().find_map(|k| meta.get(k).cloned())
+}
+
+/// Art meta keys in preference order for the effective style plus its fallbacks.
+fn art_keys(meta: &Meta, s: &Settings, cfg: &Config) -> Vec<&'static str> {
     let t = &cfg.tagger;
     let ep = meta.get("kind").is_some_and(|k| k == "episode");
     let style = s.art_style.clone().unwrap_or_else(|| t.art_style.clone());
     let order = t.art_fallback.get(&style).cloned().unwrap_or_else(|| vec![style.clone()]);
-    let keys = |st: &str| -> Vec<&str> {
+    let keys = |st: &str| -> Vec<&'static str> {
         match (st, ep) {
             ("landscape", true) => t.tv_landscape.iter().map(|c| if c == "still" { "still_url" } else { "backdrop_url" }).collect(),
             ("landscape", false) => vec!["backdrop_url"],
@@ -267,7 +278,13 @@ fn art_url(meta: &Meta, s: &Settings, cfg: &Config) -> Option<String> {
             _ => vec!["poster_url"],
         }
     };
-    order.iter().flat_map(|st| keys(st)).find_map(|k| meta.get(k).cloned())
+    let mut v: Vec<&'static str> = vec![];
+    for k in order.iter().flat_map(|st| keys(st)) {
+        if !v.contains(&k) {
+            v.push(k);
+        }
+    }
+    v
 }
 
 fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
@@ -311,8 +328,23 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
         Some(f) => meta::load(f)?,
         None => {
-            let mut m = fetch(&query(path, s, cfg)?, cfg, http, out)?;
-            if !dry && (dl || (cfg.tagger.embed_artwork && !print)) {
+            let (mut m, found) = fetch(&query(path, s, cfg)?, cfg, http, out)?;
+            let t = &cfg.tagger;
+            if !dry && t.ask_art && (dl || (t.embed_artwork && !print)) {
+                let c = askart::candidates(&found, &art_keys(&m, s, cfg), t.ask_art_max);
+                let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
+                let open = (cfg!(target_os = "macos") && t.ask_art_open_folder && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
+                let o = askart::Opts { open_cmd: open, keep: dl || t.ask_art_keep };
+                match askart::ask(path, &pp, &c, http, &o, out) {
+                    Ok(Some(p)) => {
+                        m.insert("poster_file".into(), p.to_string_lossy().into_owned());
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        let _ = writeln!(out, "    warning: artwork: {e}");
+                    }
+                }
+            } else if !dry && (dl || (t.embed_artwork && !print)) {
                 // art is optional: never lose the metadata over it
                 if let Err(e) = save_poster(path, s, cfg, &mut m, http) {
                     let _ = writeln!(out, "    warning: artwork: {e}");
@@ -464,7 +496,7 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
         ch.push(s("print_format", v));
     }
     let f = Settings::from(cli);
-    for (k, v) in [("dry_run", f.dry_run), ("download_only", f.download_only), ("print", f.print), ("recursive", f.recursive), ("tagger.embed_artwork", tri(cli.embed_artwork, cli.no_embed_artwork))] {
+    for (k, v) in [("dry_run", f.dry_run), ("download_only", f.download_only), ("print", f.print), ("recursive", f.recursive), ("tagger.embed_artwork", tri(cli.embed_artwork, cli.no_embed_artwork)), ("tagger.ask_art", tri(cli.ask_art, cli.no_ask_art))] {
         if let Some(v) = v {
             ch.push(Change { key: k, value: Value::from(v), secret: false });
         }
@@ -521,6 +553,9 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     }
     if let Some(v) = tri(cli.embed_artwork, cli.no_embed_artwork) {
         cfg.tagger.embed_artwork = v;
+    }
+    if let Some(v) = tri(cli.ask_art, cli.no_ask_art) {
+        cfg.tagger.ask_art = v;
     }
     let (ib, changed) = providers::normalize_image_base(&cfg.providers.tmdb.image_base);
     if changed && !ib.is_empty() {
@@ -1034,6 +1069,81 @@ mod tests {
         assert!(p.contains("original_show: 薬屋のひとりごと"), "{p}");
         let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out"]), &h).unwrap();
         assert!(out.contains("/out/TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗害.mp4"), "{out}");
+    }
+
+    fn ui(input: &str, tty: bool) {
+        askart::UI.with(|u| *u.borrow_mut() = Some(askart::Ui { input: Box::new(std::io::Cursor::new(input.to_string())), tty, log: Some(String::new()) }));
+    }
+    fn ui_log() -> String {
+        askart::UI.with(|u| u.borrow().as_ref().unwrap().log.clone().unwrap())
+    }
+
+    #[test]
+    fn ask_art_flow() {
+        use serde_json::json;
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("c.toml");
+        fs::write(&cfg, "[providers]\norder = [\"tmdb\", \"omdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n[providers.omdb]\napi_key = \"k\"\nbase_url = \"http://o/\"\n[tagger]\natomicparsley = \"true\"\n").unwrap();
+        let cs = cfg.to_str().unwrap();
+        let h = || providers::fake::FakeHttp::new(vec![
+            ("/search/movie", json!({"results":[{"id":603}]})),
+            ("/movie/603", json!({"title":"The Matrix","release_date":"1999-03-30","poster_path":"/p.jpg","backdrop_path":"/b.png"})),
+            ("http://o/", json!({"Title":"The Matrix","Year":"1999","Poster":"http://x/op.webp"})),
+            ("/p.jpg", json!(null)),
+            ("op.webp", json!(null)),
+            ("/b.png", json!(null)),
+        ]);
+        let m = d.path().join("The.Matrix.1999.mp4");
+        fs::write(&m, "x").unwrap();
+        let ms = m.to_str().unwrap();
+        let folder = d.path().join("The.Matrix.1999");
+        // without --ask-art: unchanged (no prompt, no folder)
+        ui("", true);
+        let (out, _, _) = run(&cli(&["--config", cs, ms]), &h()).unwrap();
+        assert!(!out.contains("ask-art") && ui_log().is_empty() && !folder.exists(), "{out}");
+        // Enter = #1; listed in preference order (posters by provider, then fallback backdrop); folder removed; embedded
+        ui("\n", true);
+        let (out, _, failed) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();
+        let log = ui_log();
+        assert_eq!(failed, 0, "{out}");
+        let (a, b, c) = (log.find("01.jpg").unwrap(), log.find("02.webp").unwrap(), log.find("03.png").unwrap());
+        assert!(a < b && b < c && log.contains("1. tmdb     poster") && log.contains("2. omdb     poster") && log.contains("3. tmdb     backdrop"), "{log}");
+        assert!(out.contains("chose #1 (tmdb poster)") && out.contains("--artwork") && out.contains("The.Matrix.1999.mp4.poster.jpg"), "{out}");
+        assert!(!folder.exists());
+        // invalid then valid
+        ui("x\n9\n2\n", true);
+        let (out, _, _) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();
+        let log = ui_log();
+        assert!(log.contains("invalid choice 'x'") && log.contains("invalid choice '9'") && out.contains("chose #2 (omdb poster)"), "{log}{out}");
+        // s = skip: nothing embedded
+        fs::remove_file(d.path().join("The.Matrix.1999.mp4.poster.jpg")).unwrap();
+        ui("s\n", true);
+        let (out, _, _) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();
+        assert!(out.contains("ask-art: skipped") && !out.contains("--artwork"), "{out}");
+        // non-TTY: no prompt, default #1 with a warning
+        ui("3\n", false);
+        let (out, _, _) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();
+        assert!(ui_log().contains("not a terminal; using #1") && !ui_log().contains("Choose") && out.contains("chose #1"), "{out}");
+        // -d keeps the folder; the chosen one is also the .poster.jpg
+        ui("3\n", true);
+        run(&cli(&["--config", cs, "--ask-art", "-d", ms]), &h()).unwrap();
+        assert!(folder.join("01.jpg").exists() && folder.join("02.webp").exists() && folder.join("03.png").exists());
+        assert!(d.path().join("The.Matrix.1999.mp4.poster.jpg").exists());
+        // --no-ask-art beats a saved ask_art; --set saves it
+        run(&cli(&["--set", "--config", cs, "--ask-art"]), &h()).unwrap();
+        assert!(fs::read_to_string(&cfg).unwrap().contains("ask_art = true"));
+        ui("", true);
+        let (out, _, _) = run(&cli(&["--config", cs, "--no-ask-art", ms]), &h()).unwrap();
+        assert!(!out.contains("ask-art"), "{out}");
+        // directory run: asked per file
+        let dir = d.path().join("dir");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("a.mp4"), "x").unwrap();
+        fs::write(dir.join("b.mp4"), "x").unwrap();
+        ui("1\n2\n", true);
+        let (out, _, _) = run(&cli(&["--config", cs, dir.to_str().unwrap()]), &h()).unwrap();
+        assert_eq!(ui_log().matches("Choose 1-3").count(), 2);
+        assert!(out.contains("chose #1") && out.contains("chose #2"), "{out}");
     }
 
 }

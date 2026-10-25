@@ -51,6 +51,15 @@ mkv_extensions = ["mkv"]
 # Artwork (like iVI4): on every normal run the poster is downloaded and embedded
 # (MP4 covr atom, replacing any existing art; MKV attachment, replacing an existing one).
 embed_artwork = true
+# --ask-art: download every art candidate (style + fallback, all providers) into a folder named after
+# the media file, list them (stderr) and ask which to embed (Enter = #1, s = skip; non-TTY uses #1).
+ask_art = false
+ask_art_max = 20
+# macOS only: open the folder (with this command) while asking.
+ask_art_open_folder = true
+ask_art_open_command = "open"
+# Keep the folder afterwards (always kept with -d).
+ask_art_keep = false
 # TV episodes: poster choice in order, falling back to the next ("season", "series").
 tv_poster = ["season", "series"]
 # Art orientation: "poster" or "landscape" (sidecar key art_style, flag --art).

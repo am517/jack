@@ -117,6 +117,14 @@ pub struct TaggerCfg {
     pub mkv_id_tags: std::collections::BTreeMap<String, String>,
     /// Also write `rated` as the iTunes content rating (iTunEXTC) in MP4s.
     pub mp4_content_rating: bool,
+    /// --ask-art: pick the art interactively from all candidates.
+    pub ask_art: bool,
+    pub ask_art_max: usize,
+    /// macOS: open the candidates folder with ask_art_open_command.
+    pub ask_art_open_folder: bool,
+    pub ask_art_open_command: String,
+    /// Keep the candidates folder (always kept with -d).
+    pub ask_art_keep: bool,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]

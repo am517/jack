@@ -72,6 +72,10 @@ with a warning.
 - Genres from every provider are merged, deduped, alphabetized and written as one string (`genre_case = "lower"`, `genre_separator = ","` under `[providers]`), e.g. `animation,comedy,family`.
 - `--grouping <text>` (or `grouping = "..."` in a sidecar/config) writes iTunes Grouping (MP4 ©grp, MKV GROUPING).
 
+### Choosing art (`--ask-art`)
+
+`--ask-art` downloads every art candidate (your art style plus its fallback, from all providers, up to `ask_art_max`) into a folder named after the media file (e.g. `Evolution.2001/01.jpg`, `02.jpg`, ...), lists them on stderr, opens the folder on macOS, and asks which to embed: a number, Enter for #1, or `s` to skip. Without a terminal it uses #1. The folder is deleted afterwards unless `-d` or `ask_art_keep = true`. Save as default with `--set --ask-art`; undo with `--no-ask-art`.
+
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:
