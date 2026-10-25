@@ -2,6 +2,9 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// Main config location under $HOME (Swarm group).
+pub const MAIN_CONFIG: &str = ".config/swarm/jack/config.toml";
+
 pub const DEFAULT_CONFIG: &str = include_str!("../config/jack.toml");
 
 /// Per-file options (main config top level, sidecar, flags); all optional so layers merge.
@@ -116,7 +119,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
     let mut v: toml::Value = toml::from_str(DEFAULT_CONFIG).map_err(|e| format!("built-in config: {e}"))?;
     let path = match explicit {
         Some(p) => Some(expand(p)),
-        None => std::env::var_os("HOME").map(|h| Path::new(&h).join(".config/jack/config.toml")),
+        None => std::env::var_os("HOME").map(|h| Path::new(&h).join(MAIN_CONFIG)),
     };
     if let Some(p) = path {
         match read(&p)? {

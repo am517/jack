@@ -18,7 +18,7 @@ struct Cli {
     /// Files or directories to process
     #[arg(required = true)]
     paths: Vec<PathBuf>,
-    /// Main config file (default: ~/.config/jack/config.toml)
+    /// Main config file (default: ~/.config/swarm/jack/config.toml)
     #[arg(long)]
     config: Option<PathBuf>,
     #[arg(long)]
@@ -236,6 +236,11 @@ mod tests {
         assert_eq!(s.output, Some(PathBuf::from("/main")));
         assert_eq!(s.recursive, Some(true));
         assert!(s.extensions.unwrap().contains(&"mkv".to_string()));
+    }
+
+    #[test]
+    fn main_config_under_swarm() {
+        assert_eq!(config::MAIN_CONFIG, ".config/swarm/jack/config.toml");
     }
 
     #[test]

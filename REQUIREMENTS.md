@@ -20,7 +20,7 @@ build the best composite metadata, write it into the files, and sort them into f
 - --dry-run             show what would change (recommended default for first runs)
 
 ## Config
-- Main config (~/.config/jack/config.toml): API keys, provider priority per field, naming templates, output root.
+- Main config (~/.config/swarm/jack/config.toml): API keys, provider priority per field, naming templates, output root.
 - Per-file sidecar: `<filename>.config` beside the media file, same options as flags (alternative to flags).
 - Precedence: flags > sidecar > main config. All tweakables live in config, not code (Adam's rule).
 

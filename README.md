@@ -12,7 +12,7 @@ Status: phases 1-4 done: CLI, config + sidecar, scan, tag writing, TMDB/TheTVDB 
 ```zsh
 brew install atomicparsley exiftool mkvtoolnix
 cargo build --release
-mkdir -p ~/.config/jack && cp config/jack.toml ~/.config/jack/config.toml
+mkdir -p ~/.config/swarm/jack && cp config/jack.toml ~/.config/swarm/jack/config.toml
 # then add your keys under [providers.tmdb] and [providers.thetvdb]
 ```
 
@@ -28,7 +28,7 @@ jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then 
 
 ## Config
 
-- Main config: `~/.config/jack/config.toml` or `--config <path>`; deep-merged over the built-in defaults in `config/jack.toml`, which documents every key.
+- Main config: `~/.config/swarm/jack/config.toml` or `--config <path>`; deep-merged over the built-in defaults in `config/jack.toml`, which documents every key.
 - Per-file sidecar: `<file>.config` (e.g. `movie.mp4.config`) with the same keys as the flags (`imdb`, `tmdb`, `thetvdb`, `output`, `dry_run`, ...).
 - Precedence: flags > sidecar > main config > built-in defaults. `~` is expanded in paths.
 - Tweakable there: extensions, tag tool and paths, provider order, keys and base URLs, per-field merge priority, filename regexes, sort templates, move/copy.

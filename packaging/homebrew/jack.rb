@@ -22,8 +22,8 @@ class Jack < Formula
   def caveats
     <<~EOS
       Copy the example config and add your TMDB / TheTVDB keys:
-        mkdir -p ~/.config/jack
-        cp #{etc}/jack/config.toml.example ~/.config/jack/config.toml
+        mkdir -p ~/.config/swarm/jack
+        cp #{etc}/jack/config.toml.example ~/.config/swarm/jack/config.toml
     EOS
   end
 
