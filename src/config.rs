@@ -5,6 +5,20 @@ use std::path::{Path, PathBuf};
 /// Main config location under $HOME (Swarm group).
 pub const MAIN_CONFIG: &str = ".config/swarm/jack/config.toml";
 
+/// Project keys embedded at build time (never committed). Config values win over these.
+pub const EMBED_TMDB_TOKEN: Option<&str> = option_env!("JACK_TMDB_TOKEN");
+pub const EMBED_TVDB_KEY: Option<&str> = option_env!("JACK_TVDB_KEY");
+
+/// Fill empty provider keys from embedded build-time keys (config file value > embedded key).
+pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>, tvdb: Option<&str>) {
+    if p.tmdb.read_token.is_empty() && p.tmdb.api_key.is_empty() {
+        p.tmdb.read_token = tmdb.unwrap_or_default().to_string();
+    }
+    if p.thetvdb.api_key.is_empty() {
+        p.thetvdb.api_key = tvdb.unwrap_or_default().to_string();
+    }
+}
+
 pub const DEFAULT_CONFIG: &str = include_str!("../config/jack.toml");
 
 /// Per-file options (main config top level, sidecar, flags); all optional so layers merge.
@@ -132,6 +146,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
     for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit] {
         expand_s(s);
     }
+    apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY);
     Ok(c)
 }
 
@@ -162,4 +177,22 @@ pub fn has_ext(p: &Path, exts: &[String]) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| exts.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_key_beats_embedded_key() {
+        let mut p = crate::providers::ProvidersCfg::default();
+        p.thetvdb.api_key = "from-config".into();
+        apply_embedded(&mut p, Some("emb-tmdb"), Some("emb-tvdb"));
+        assert_eq!(p.thetvdb.api_key, "from-config");
+        assert_eq!(p.tmdb.read_token, "emb-tmdb");
+        let mut p = crate::providers::ProvidersCfg::default();
+        p.tmdb.api_key = "v3".into();
+        apply_embedded(&mut p, Some("emb-tmdb"), None);
+        assert_eq!((p.tmdb.read_token.as_str(), p.thetvdb.api_key.as_str()), ("", ""));
+    }
 }

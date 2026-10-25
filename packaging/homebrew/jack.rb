@@ -15,6 +15,9 @@ class Jack < Formula
   depends_on "mkvtoolnix"
 
   def install
+    # Optional embedded project keys; see README (extractable from the binary).
+    ENV["JACK_TMDB_TOKEN"] = ENV.fetch("HOMEBREW_JACK_TMDB_TOKEN", "")
+    ENV["JACK_TVDB_KEY"] = ENV.fetch("HOMEBREW_JACK_TVDB_KEY", "")
     system "cargo", "install", *std_cargo_args
     (etc/"jack").install "config/jack.toml" => "config.toml.example"
   end

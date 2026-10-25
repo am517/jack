@@ -35,6 +35,16 @@ jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then 
 
 Packaging: see `packaging/homebrew/` (draft formula for the shared Swarm tap).
 
+## API keys
+
+Keys come from the config file first, then from project keys embedded at build time:
+
+```zsh
+JACK_TMDB_TOKEN=... JACK_TVDB_KEY=... cargo build --release
+```
+
+Config `[providers.tmdb] read_token`/`api_key` and `[providers.thetvdb] api_key` override embedded keys. The TheTVDB subscriber `pin` is config-only. With neither, Jack reports which key to set. Never commit keys (`.env`, `*.key` and `secrets*` are git-ignored). Keys embedded in a binary can be extracted from it.
+
 ## Attribution
 
 - Metadata provided by TheTVDB: https://thetvdb.com

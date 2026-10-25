@@ -4,3 +4,7 @@
 *.log
 /config/*.local.toml
 .env
+.env.*
+*.key
+secrets*
+/config/config.toml
