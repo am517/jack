@@ -1,6 +1,6 @@
-# Homebrew (shared Swarm tap): draft
+# Homebrew (shared Windups tap): draft
 
-One tap, `homebrew-swarm`, holds formulas for all Swarm apps (jack, saikanji, ...).
+One tap, `homebrew-tap`, holds formulas for all Windups apps (jack, saikanji, ...).
 Nothing is published yet.
 
 ## Embedded API keys (optional)
@@ -17,7 +17,7 @@ Build with `HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... brew install
 (Homebrew passes `HOMEBREW_*` variables through), or from a CI secret when building bottles.
 Caveat: keys embedded in a public bottle or binary can be extracted (e.g. with `strings`); use
 keys you're allowed to distribute, or leave them out and have users set them in
-`~/.config/swarm/jack/config.toml`.
+`~/.config/windups/jack/config.toml`.
 
 ## Publish
 
@@ -25,7 +25,7 @@ keys you're allowed to distribute, or leave them out and have users set them in
 2. Get the tarball checksum:
    `curl -L https://github.com/OWNER/jack/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256`
 3. In `jack.rb`, fill in `homepage`, `url`, `sha256`, `license` (all marked TODO).
-4. Create the tap repo `OWNER/homebrew-swarm` (or reuse the existing one) and
+4. Create the tap repo `OWNER/homebrew-tap` (or reuse the existing one) and
    copy `jack.rb` to `Formula/jack.rb` there, beside `Formula/saikanji.rb`.
-5. Test locally: `brew install --build-from-source OWNER/swarm/jack && brew test jack && brew audit --strict jack`.
-6. Install: `brew tap OWNER/swarm && brew install jack`.
+5. Test locally: `brew install --build-from-source OWNER/windups/jack && brew test jack && brew audit --strict jack`.
+6. Install: `brew tap OWNER/windups && brew install jack`.

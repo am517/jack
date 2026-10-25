@@ -1,6 +1,6 @@
-# Draft formula for the shared Swarm tap (homebrew-swarm). Not published yet.
+# Draft formula for the shared Windups tap (homebrew-tap). Not published yet.
 class Jack < Formula
-  desc "Tag and sort movie and TV files (Swarm)"
+  desc "Tag and sort movie and TV files (Windups)"
   homepage "https://github.com/TODO-OWNER/jack" # TODO: real repo URL
   # TODO: point at a tagged release tarball and fill in its sha256
   #   (shasum -a 256 jack-0.1.0.tar.gz).
@@ -25,8 +25,8 @@ class Jack < Formula
   def caveats
     <<~EOS
       Copy the example config and add your TMDB / TheTVDB keys:
-        mkdir -p ~/.config/swarm/jack
-        cp #{etc}/jack/config.toml.example ~/.config/swarm/jack/config.toml
+        mkdir -p ~/.config/windups/jack
+        cp #{etc}/jack/config.toml.example ~/.config/windups/jack/config.toml
     EOS
   end
 

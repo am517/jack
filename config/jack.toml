@@ -1,5 +1,5 @@
 # Jack configuration. All tweakable behavior lives here, not in code.
-# Copy to ~/.config/swarm/jack/config.toml (or pass --config <path>).
+# Copy to ~/.config/windups/jack/config.toml (or pass --config <path>).
 # This file is also compiled in as the fallback defaults.
 # Per-file sidecar: "<filename>.config" beside the media file, same keys.
 # Precedence: CLI flags > sidecar > main config > these defaults.

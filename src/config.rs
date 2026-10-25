@@ -2,8 +2,8 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// Main config location under $HOME (Swarm group).
-pub const MAIN_CONFIG: &str = ".config/swarm/jack/config.toml";
+/// Main config location under $HOME (Windups group).
+pub const MAIN_CONFIG: &str = ".config/windups/jack/config.toml";
 
 /// Project keys embedded at build time (never committed). Config values win over these.
 pub const EMBED_TMDB_TOKEN: Option<&str> = option_env!("JACK_TMDB_TOKEN");

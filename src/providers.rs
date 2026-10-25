@@ -136,7 +136,7 @@ impl Tmdb<'_> {
         } else if !self.cfg.api_key.is_empty() {
             url += &format!("&api_key={}", enc(&self.cfg.api_key));
         } else {
-            return Err("no API key; set [providers.tmdb] read_token or api_key in ~/.config/swarm/jack/config.toml (or build with JACK_TMDB_TOKEN)".into());
+            return Err("no API key; set [providers.tmdb] read_token or api_key in ~/.config/windups/jack/config.toml (or build with JACK_TMDB_TOKEN)".into());
         }
         for (k, v) in params {
             url += &format!("&{k}={}", enc(v));
@@ -216,7 +216,7 @@ impl<'a> Tvdb<'a> {
     fn get(&self, path: &str) -> Result<Value, String> {
         if self.token.borrow().is_none() {
             if self.cfg.api_key.is_empty() {
-                return Err("no API key; set [providers.thetvdb] api_key (and pin if required) in ~/.config/swarm/jack/config.toml (or build with JACK_TVDB_KEY)".into());
+                return Err("no API key; set [providers.thetvdb] api_key (and pin if required) in ~/.config/windups/jack/config.toml (or build with JACK_TVDB_KEY)".into());
             }
             let mut b = json!({ "apikey": self.cfg.api_key });
             if !self.cfg.pin.is_empty() {

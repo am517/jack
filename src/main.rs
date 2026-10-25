@@ -21,7 +21,7 @@ struct Cli {
     /// Files or directories to process
     #[arg(required = true)]
     paths: Vec<PathBuf>,
-    /// Main config file (default: ~/.config/swarm/jack/config.toml)
+    /// Main config file (default: ~/.config/windups/jack/config.toml)
     #[arg(long)]
     config: Option<PathBuf>,
     #[arg(long)]
@@ -250,8 +250,8 @@ mod tests {
     }
 
     #[test]
-    fn main_config_under_swarm() {
-        assert_eq!(config::MAIN_CONFIG, ".config/swarm/jack/config.toml");
+    fn main_config_under_windups() {
+        assert_eq!(config::MAIN_CONFIG, ".config/windups/jack/config.toml");
     }
 
     #[test]
