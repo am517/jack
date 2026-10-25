@@ -126,6 +126,7 @@ pub struct Config {
     pub merge: crate::sorter::MergeCfg,
     pub matching: crate::matcher::MatchCfg,
     pub sort: crate::sorter::SortCfg,
+    pub naming: crate::sorter::NamingCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {

@@ -88,6 +88,10 @@ rating_rotten_tomatoes = "ROTTEN_TOMATOES"
 rating_metacritic = "METACRITIC"
 rated = "RATED"
 awards = "AWARDS"
+# Original-language names (keep_original).
+original_title = "ORIGINAL_TITLE"
+original_show = "ORIGINAL_SHOW"
+original_episode_title = "ORIGINAL_EPISODE_TITLE"
 # MKV: global simple tags, merged into the existing tags (others, incl. track tags, are kept).
 [tagger.mkv_id_tags]
 imdb_id = "IMDB"
@@ -102,17 +106,32 @@ rating_rotten_tomatoes = "ROTTEN_TOMATOES_RATING"
 rating_metacritic = "METACRITIC_RATING"
 rated = "LAW_RATING"
 awards = "AWARDS"
+original_title = "ORIGINAL_TITLE"
+original_show = "ORIGINAL_SHOW"
+original_episode_title = "ORIGINAL_EPISODE_TITLE"
 
 [providers]
 # Providers to query, in order. (IMDb ids given with --imdb are resolved through TMDB.)
 # OMDb adds ratings (IMDb, Rotten Tomatoes, Metacritic), rated and awards; skipped with a warning without a key.
 order = ["tmdb", "thetvdb", "omdb"]
+# Primary display language (ISO 639-1): titles, show and episode names in tags, meta and file names.
+# TMDB uses [providers.tmdb] language; TheTVDB uses translations (language_codes maps to its codes).
+language = "en"
+# Also keep original-language names: original_title / original_show / original_episode_title
+# (MP4 freeform atoms / MKV tags below, meta.json, --print, template placeholders).
+keep_original = true
+# Append " (year)" to TV show names.
+tv_show_year = false
+# Append "Original title: ..." to the description.
+original_in_description = false
+language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", it = "ita", pt = "por", ko = "kor", zh = "zho", ru = "rus", nl = "nld", sv = "swe" }
 
 [providers.tmdb]
 # Get one at https://www.themoviedb.org/settings/api. Set read_token (preferred) or api_key.
 read_token = ""
 api_key = ""
 base_url = "https://api.themoviedb.org/3"
+# No size segment here (sizes are below); a trailing /original or /w780 is stripped with a warning.
 image_base = "https://image.tmdb.org/t/p"
 # Poster size: w92 w154 w185 w342 w500 w780 original.
 poster_size = "original"
@@ -132,6 +151,8 @@ base_url = "https://api4.thetvdb.com/v4"
 poster_size = "full"
 # Preferred background-art language; falls back to untagged.
 image_language = "eng"
+# Translation language (e.g. "eng"); empty: [providers] language via language_codes.
+language = ""
 
 [providers.omdb]
 # Get one at https://www.omdbapi.com/apikey.aspx.
@@ -176,10 +197,22 @@ cleanup = [
 ]
 # If a TV filename has no show name, use the parent folder name.
 show_from_parent_dir = true
+# Last resort: episode title from the filename (text after SxxExx, before release junk).
+episode_title_from_filename = true
+
+[naming]
+# Languages for sorted names: "original" (original-language names, when known) or a language code.
+# The [providers] language code gives the primary names; other codes fall back to them (not fetched).
+# A missing name falls back to the other language. Tag language is [providers] language.
+file_language = "original"
+folder_language = "en"
+# Max bytes per file/folder name (UTF-8 safe; names are NFC-normalized, control chars replaced).
+max_component_bytes = 255
 
 [sort]
 # Used only when an output root is set (--output or `output` above). Paths are relative to it.
-# Placeholders: {title} {year} {show} {season} {episode} {episode_title} {ext}; {season:02} zero-pads.
+# Placeholders: {title} {year} {show} {season} {episode} {episode_title} {original_title} {original_show}
+# {original_episode_title} {ext} (any metadata key); {season:02} zero-pads. Empty " - {x}" parts are dropped.
 movie_template = "Movies/{title} ({year})/{title} ({year}).{ext}"
 tv_template = "TV/{show}/Season {season:02}/{show} - S{season:02}E{episode:02} - {episode_title}.{ext}"
 # "move" or "copy".

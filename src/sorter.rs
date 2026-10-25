@@ -51,13 +51,71 @@ pub fn render(tpl: &str, m: &Meta, ext: &str, cfg: &SortCfg) -> String {
         rest = &rest[i + j + 1..];
     }
     out += rest;
+    // drop separators left by empty placeholders ("Show - S01E01 - .mkv")
+    for (a, b) in [(" - .", "."), (" - /", "/"), (" -  - ", " - ")] {
+        out = out.replace(a, b);
+    }
     out
 }
 
-pub fn destination(root: &Path, file: &Path, m: &Meta, cfg: &SortCfg) -> PathBuf {
+/// [naming]: which language names folders and files ("original" or a language code).
+#[derive(Deserialize, Debug, Default, Clone)]
+#[serde(default)]
+pub struct NamingCfg {
+    pub file_language: String,
+    pub folder_language: String,
+    /// Max bytes per path component (UTF-8 safe; the extension is kept).
+    pub max_component_bytes: usize,
+}
+
+/// Names for `lang`: "original" swaps in original_* names where known; anything else (the primary
+/// language, or a code not fetched) uses the primary names. Missing names fall back to the other.
+fn localized(m: &Meta, lang: &str) -> Meta {
+    let mut x = m.clone();
+    if lang == "original" {
+        for (k, o) in [("title", "original_title"), ("show", "original_show"), ("episode_title", "original_episode_title")] {
+            if let Some(v) = m.get(o) {
+                x.insert(k.into(), v.clone());
+            }
+        }
+    }
+    x
+}
+
+/// NFC, control chars -> replacement, no trailing dots/spaces, at most `max` bytes (cut at a char boundary,
+/// keeping `.ext` when `ext` is given).
+pub fn safe_component(c: &str, ext: Option<&str>, cfg: &SortCfg, max: usize) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let c: String = c.nfc().map(|ch| if ch.is_control() { cfg.replacement.clone() } else { ch.to_string() }).collect();
+    let suffix = ext.filter(|e| !e.is_empty()).map(|e| format!(".{e}")).filter(|s| c.ends_with(s.as_str()));
+    let mut stem = c[..c.len() - suffix.as_ref().map_or(0, |s| s.len())].to_string();
+    let budget = if max == 0 { usize::MAX } else { max.saturating_sub(suffix.as_ref().map_or(0, |s| s.len())) };
+    if stem.len() > budget {
+        let mut i = budget;
+        while !stem.is_char_boundary(i) {
+            i -= 1;
+        }
+        stem.truncate(i);
+    }
+    let stem = stem.trim_end_matches(['.', ' ']);
+    let out = format!("{stem}{}", suffix.unwrap_or_default());
+    if out.is_empty() { cfg.replacement.clone() } else { out }
+}
+
+pub fn destination(root: &Path, file: &Path, m: &Meta, cfg: &SortCfg, n: &NamingCfg) -> PathBuf {
     let ext = file.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let tv = m.get("kind").is_some_and(|k| k == "episode");
-    root.join(render(if tv { &cfg.tv_template } else { &cfg.movie_template }, m, &ext, cfg))
+    let tpl = if tv { &cfg.tv_template } else { &cfg.movie_template };
+    let folders = render(tpl, &localized(m, &n.folder_language), &ext, cfg);
+    let name = render(tpl, &localized(m, &n.file_language), &ext, cfg);
+    let mut parts: Vec<&str> = folders.split('/').collect();
+    parts.pop();
+    let mut p = root.to_path_buf();
+    for c in parts.iter().filter(|c| !c.is_empty()) {
+        p.push(safe_component(c, None, cfg, n.max_component_bytes));
+    }
+    p.push(safe_component(name.rsplit('/').next().unwrap_or(""), Some(&ext), cfg, n.max_component_bytes));
+    p
 }
 
 pub fn apply(from: &Path, to: &Path, cfg: &SortCfg) -> Result<(), String> {
@@ -96,19 +154,49 @@ mod tests {
 
     #[test]
     fn templates_and_move() {
-        let cfg = crate::config::load(Some(Path::new("config/jack.toml"))).unwrap().sort;
+        let all = crate::config::load(Some(Path::new("config/jack.toml"))).unwrap();
+        let (cfg, en) = (all.sort, NamingCfg { file_language: "en".into(), ..all.naming });
         let ep = m(&[("kind", "episode"), ("show", "Saiki K"), ("season", "1"), ("episode", "2"), ("episode_title", "Who/What?")]);
-        let d = destination(Path::new("/out"), Path::new("x.mkv"), &ep, &cfg);
+        let d = destination(Path::new("/out"), Path::new("x.mkv"), &ep, &cfg, &en);
         assert_eq!(d, PathBuf::from("/out/TV/Saiki K/Season 01/Saiki K - S01E02 - Who-What-.mkv"));
         let mv = m(&[("kind", "movie"), ("title", "The Matrix"), ("year", "1999")]);
         let t = tempfile::tempdir().unwrap();
         let src = t.path().join("a.mp4");
         std::fs::write(&src, "x").unwrap();
-        let dst = destination(t.path(), &src, &mv, &cfg);
+        let dst = destination(t.path(), &src, &mv, &cfg, &en);
         assert!(dst.ends_with("Movies/The Matrix (1999)/The Matrix (1999).mp4"));
         apply(&src, &dst, &cfg).unwrap();
         assert!(dst.exists() && !src.exists());
         std::fs::write(&src, "y").unwrap();
         assert!(apply(&src, &dst, &cfg).unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn bilingual_naming_fallback_and_safety() {
+        let all = crate::config::load(Some(Path::new("config/jack.toml"))).unwrap();
+        let (cfg, n) = (all.sort, all.naming); // defaults: files original, folders en
+        let ep = m(&[("kind", "episode"), ("show", "The Apothecary Diaries"), ("original_show", "薬屋のひとりごと"), ("season", "3"), ("episode", "1"), ("episode_title", "Locusts"), ("original_episode_title", "蝗")]);
+        let d = destination(Path::new("/out"), Path::new("a.mp4"), &ep, &cfg, &n);
+        assert_eq!(d, PathBuf::from("/out/TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗.mp4"));
+        // original missing -> primary; primary-only folder lang with original file lang swapped
+        let mut half = ep.clone();
+        half.remove("original_episode_title");
+        let d = destination(Path::new("/o"), Path::new("a.mp4"), &half, &cfg, &n);
+        assert!(d.ends_with("薬屋のひとりごと - S03E01 - Locusts.mp4"), "{d:?}");
+        let sw = NamingCfg { file_language: "en".into(), folder_language: "original".into(), ..n.clone() };
+        let d = destination(Path::new("/o"), Path::new("a.mp4"), &ep, &cfg, &sw);
+        assert_eq!(d, PathBuf::from("/o/TV/薬屋のひとりごと/Season 03/The Apothecary Diaries - S03E01 - Locusts.mp4"));
+        let mut no_orig = ep.clone();
+        no_orig.retain(|k, _| !k.starts_with("original"));
+        assert!(destination(Path::new("/o"), Path::new("a.mp4"), &no_orig, &cfg, &sw).starts_with("/o/TV/The Apothecary Diaries"));
+        // NFC: decomposed e + combining acute -> é
+        assert_eq!(safe_component("Poke\u{301}mon\u{1}x. ", None, &cfg, 255), "Pokémon-x");
+        let mv = m(&[("kind", "movie"), ("title", "Amélie: A/B? \"x\" <y>|z\\"), ("year", "2001")]);
+        let d = destination(Path::new("/o"), Path::new("a.mkv"), &mv, &cfg, &n);
+        assert_eq!(d, PathBuf::from("/o/Movies/Amélie- A-B- -x- -y--z- (2001)/Amélie- A-B- -x- -y--z- (2001).mkv"));
+        // byte cap at a char boundary, extension kept
+        let s = safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20);
+        assert_eq!(s, format!("{}.mp4", "薬".repeat(5)));
+        assert!(s.len() <= 20);
     }
 }

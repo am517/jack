@@ -64,6 +64,12 @@ struct Cli {
     /// Art orientation: poster or landscape
     #[arg(long, value_parser = ["poster", "landscape"])]
     art: Option<String>,
+    /// File-name language: original or a language code (see [naming])
+    #[arg(long)]
+    file_language: Option<String>,
+    /// Folder-name language: original or a language code
+    #[arg(long)]
+    folder_language: Option<String>,
     /// Media type: tv, movie or auto (forces filename matching and provider search)
     #[arg(long = "type", value_parser = ["tv", "movie", "auto"])]
     kind: Option<String>,
@@ -179,8 +185,19 @@ fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
 
 /// Composite metadata from all providers in [providers] order, merged per [merge].
 fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<Meta, String> {
-    let tmdb = Tmdb { cfg: cfg.providers.tmdb.clone(), http };
-    let tvdb = Tvdb::new(cfg.providers.thetvdb.clone(), http);
+    let pc = &cfg.providers;
+    let mut tc = pc.tmdb.clone();
+    tc.keep_original = pc.keep_original;
+    if tc.language.is_empty() {
+        tc.language = pc.language.clone();
+    }
+    let mut vc = pc.thetvdb.clone();
+    vc.keep_original = pc.keep_original;
+    if vc.language.is_empty() {
+        vc.language = pc.language_codes.get(&pc.language).cloned().unwrap_or_else(|| pc.language.clone());
+    }
+    let tmdb = Tmdb { cfg: tc, http };
+    let tvdb = Tvdb::new(vc, http);
     let omdb = Omdb { cfg: cfg.providers.omdb.clone(), http };
     let (mut found, mut errs) = (vec![], vec![]);
     for name in &cfg.providers.order {
@@ -191,7 +208,12 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
             x => return Err(format!("[providers] order: unknown provider '{x}'")),
         };
         match p.lookup(q) {
-            Ok(Some(m)) => found.push((name.clone(), m)),
+            Ok(Some(mut m)) => {
+                if let Some(w) = m.remove(providers::WARNING) {
+                    errs.push(format!("{}: {w}", p.name()));
+                }
+                found.push((name.clone(), m))
+            }
             Ok(None) => {}
             Err(e) => errs.push(format!("{}: {e}", p.name())),
         }
@@ -202,7 +224,25 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
     for e in errs {
         let _ = writeln!(out, "    warning: {e}");
     }
-    Ok(sorter::merge(&found, &cfg.merge))
+    let mut m = sorter::merge(&found, &cfg.merge);
+    let ep = m.get("kind").is_some_and(|k| k == "episode");
+    if ep && !m.contains_key("episode_title") && cfg.matching.episode_title_from_filename {
+        if let Some(t) = &q.episode_title {
+            let _ = writeln!(out, "    warning: no episode title from providers; using the filename's ({t})");
+            m.insert("episode_title".into(), t.clone());
+        }
+    }
+    if ep && pc.tv_show_year {
+        if let (Some(s), Some(y)) = (m.get("show").cloned(), m.get("year").cloned()) {
+            m.insert("show".into(), format!("{s} ({y})"));
+        }
+    }
+    if pc.original_in_description {
+        if let (Some(o), Some(d)) = (m.get("original_title").cloned(), m.get("description").cloned()) {
+            m.insert("description".into(), format!("{d}\n\nOriginal title: {o}"));
+        }
+    }
+    Ok(m)
 }
 
 /// The art URL for the effective style (flag > sidecar > [tagger] art_style), with fallbacks.
@@ -265,11 +305,15 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         None => {
             let mut m = fetch(&query(path, s, cfg)?, cfg, http, out)?;
             if !dry && (dl || (cfg.tagger.embed_artwork && !print)) {
-                save_poster(path, s, cfg, &mut m, http)?;
+                // art is optional: never lose the metadata over it
+                if let Err(e) = save_poster(path, s, cfg, &mut m, http) {
+                    let _ = writeln!(out, "    warning: artwork: {e}");
+                }
             }
             m
         }
     };
+    let _ = writeln!(out, "    ids: {}", found_ids(&meta, s));
     if s.youtube.is_some() {
         let _ = writeln!(out, "    note: --youtube is not supported yet (later phase)");
     }
@@ -299,13 +343,19 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         }
     }
     if let Some(root) = &s.output {
-        let to = sorter::destination(root, path, &meta, &cfg.sort);
+        let to = sorter::destination(root, path, &meta, &cfg.sort, &cfg.naming);
         let _ = writeln!(out, "    {}: {}", cfg.sort.mode, to.display());
         if !dry {
             sorter::apply(path, &to, &cfg.sort)?;
         }
     }
     Ok(())
+}
+
+/// Ids in the metadata (else the requested ones).
+fn found_ids(m: &Meta, s: &Settings) -> String {
+    let v: Vec<String> = ["imdb_id", "tmdb_id", "tmdb_episode_id", "thetvdb_id", "thetvdb_episode_id"].iter().filter_map(|k| m.get(*k).map(|v| format!("{}={v}", k.trim_end_matches("_id")))).collect();
+    if v.is_empty() { ids(s) } else { v.join(" ") }
 }
 
 fn ids(s: &Settings) -> String {
@@ -391,6 +441,11 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     if let Some(v) = &Settings::from(cli).kind {
         ch.push(s("type", v));
     }
+    for (k, v) in [("naming.file_language", &cli.file_language), ("naming.folder_language", &cli.folder_language)] {
+        if let Some(v) = v {
+            ch.push(s(k, v));
+        }
+    }
     if let Some(v) = &cli.print_format {
         ch.push(s("print_format", v));
     }
@@ -434,6 +489,12 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     if let Some(t) = &cli.mp4_tool {
         cfg.tagger.mp4_tool = t.clone();
     }
+    if let Some(v) = &cli.file_language {
+        cfg.naming.file_language = v.clone();
+    }
+    if let Some(v) = &cli.folder_language {
+        cfg.naming.folder_language = v.clone();
+    }
     // credential flags beat config and embedded keys (this run)
     for (_, k, v) in secret_values(cli) {
         let p = &mut cfg.providers;
@@ -447,6 +508,11 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     if let Some(v) = tri(cli.embed_artwork, cli.no_embed_artwork) {
         cfg.tagger.embed_artwork = v;
     }
+    let (ib, changed) = providers::normalize_image_base(&cfg.providers.tmdb.image_base);
+    if changed && !ib.is_empty() {
+        pre += &format!("warning: [providers.tmdb] image_base {:?} -> {ib:?} (sizes come from poster_size etc.; update your config)\n", cfg.providers.tmdb.image_base);
+        cfg.providers.tmdb.image_base = ib;
+    }
     let flags = Settings::from(cli);
     let top = flags.clone().over(&cfg.base);
     let files = scan(&cli.paths, &top);
@@ -456,7 +522,6 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     for p in files {
         let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
             let _ = writeln!(o, "{}{}", p.display(), if side { "  [sidecar]" } else { "" });
-            let _ = writeln!(o, "    ids: {}", ids(&s));
             process(&p, &s, &cfg, http, &mut o, &mut pr)
         });
         if let Err(e) = r {
@@ -916,4 +981,42 @@ mod tests {
     fn missing_explicit_config_errors() {
         assert!(config::load(Some(Path::new("/nonexistent/jack.toml"))).is_err());
     }
+    #[test]
+    fn apothecary_real_world_regressions() {
+        use serde_json::json;
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("c.toml");
+        fs::write(&cfg, "[providers]\norder = [\"tmdb\", \"thetvdb\"]\nlanguage = \"en\"\nkeep_original = true\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\nimage_base = \"http://img/t/p/original/\"\n[providers.thetvdb]\napi_key = \"k\"\nbase_url = \"http://v\"\n").unwrap();
+        let m = d.path().join("The Apothecary Diaries - S03E01 - Locusts.mp4");
+        fs::write(&m, "x").unwrap();
+        let h = providers::fake::FakeHttp::new(vec![
+            ("http://t/search/tv", json!({"results":[{"id":220542}]})),
+            ("http://t/tv/220542/episode_groups", json!({"results":[]})),
+            ("http://t/tv/220542?", json!({"name":"The Apothecary Diaries","original_name":"薬屋のひとりごと","first_air_date":"2023-10-22","poster_path":"/p.jpg","seasons":[{"season_number":1,"episode_count":24},{"season_number":2,"episode_count":24},{"season_number":3,"episode_count":12}]})),
+            ("/login", json!({"data":{"token":"T"}})),
+            ("http://v/search", json!({"data":[{"tvdb_id":"482073","name":"薬屋のひとりごと (2027)","year":"2027"},{"tvdb_id":"433631","name":"薬屋のひとりごと","year":"2023","translations":{"eng":"The Apothecary Diaries"}}]})),
+            ("/series/433631/translations/eng", json!({"data":{"name":"The Apothecary Diaries","overview":"Maomao..."}})),
+            ("/series/433631/episodes", json!({"data":{"episodes":[{"id":777,"name":"蝗害","seasonNumber":3,"number":1}]}})),
+            ("/episodes/777/translations/eng", json!({"data":{"name":"Locusts"}})),
+            ("/series/433631/extended", json!({"data":{}})),
+            ("/series/433631", json!({"data":{"id":433631,"name":"薬屋のひとりごと","firstAired":"2023-10-22","year":"2027"}})),
+        ]);
+        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-p", "-o", "/out"]);
+        let (out, p, failed) = run(&c, &h).unwrap();
+        assert_eq!(failed, 0, "{out}");
+        let meta = meta::load(&d.path().join("The Apothecary Diaries - S03E01 - Locusts.mp4.meta.json")).unwrap();
+        assert_eq!(meta["show"], "The Apothecary Diaries");
+        assert_eq!(meta["original_show"], "薬屋のひとりごと");
+        assert_eq!(meta["year"], "2023", "firstAired, not the 2027 duplicate");
+        assert_eq!(meta["episode_title"], "Locusts");
+        assert_eq!(meta["original_episode_title"], "蝗害");
+        assert!(out.contains("warning: tmdb: no S03E01"), "{out}");
+        assert!(out.contains("tmdb=220542") && out.contains("433631"), "{out}");
+        assert_eq!(out.matches("image_base").count(), 1, "{out}");
+        assert!(out.contains("warning: artwork:"), "art failure is a warning: {out}");
+        assert!(p.contains("original_show: 薬屋のひとりごと"), "{p}");
+        let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out"]), &h).unwrap();
+        assert!(out.contains("/out/TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗害.mp4"), "{out}");
+    }
+
 }

@@ -49,6 +49,8 @@ pub struct Query {
     pub imdb: Option<String>,
     pub tmdb: Option<String>,
     pub thetvdb: Option<String>,
+    /// Episode title guessed from the filename (text after SxxExx), a last-resort fallback.
+    pub episode_title: Option<String>,
     /// Forced type: Some("tv") / Some("movie"); None = guess.
     pub kind: Option<String>,
 }
@@ -81,6 +83,9 @@ pub struct TmdbCfg {
     /// Preferred language for landscape art (ISO 639-1, e.g. "en"); null-language art is the fallback.
     pub image_language: String,
     pub language: String,
+    /// Filled from [providers] keep_original.
+    #[serde(skip)]
+    pub keep_original: bool,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -93,6 +98,10 @@ pub struct TvdbCfg {
     pub api_key: String,
     pub pin: String,
     pub base_url: String,
+    /// Translation language (ISO 639-2, e.g. "eng"); empty: from [providers] language via language_codes.
+    pub language: String,
+    #[serde(skip)]
+    pub keep_original: bool,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -109,6 +118,16 @@ pub struct OmdbCfg {
 #[serde(default)]
 pub struct ProvidersCfg {
     pub order: Vec<String>,
+    /// Primary display language (ISO 639-1, e.g. "en").
+    pub language: String,
+    /// Also keep original-language names (original_title / original_show / original_episode_title).
+    pub keep_original: bool,
+    /// ISO 639-1 -> ISO 639-2 (TheTVDB translations).
+    pub language_codes: std::collections::BTreeMap<String, String>,
+    /// Append " (year)" to TV show names.
+    pub tv_show_year: bool,
+    /// Append "Original title: ..." to the description.
+    pub original_in_description: bool,
     pub tmdb: TmdbCfg,
     pub thetvdb: TvdbCfg,
     pub omdb: OmdbCfg,
@@ -150,6 +169,36 @@ fn digits_after(x: &str, marker: &str) -> Option<String> {
     (!d.is_empty()).then_some(d)
 }
 
+/// TheTVDB disambiguates duplicate names with a trailing " (YYYY)"; strip it.
+pub fn strip_year_suffix(n: &str) -> String {
+    let t = n.trim_end();
+    match t.strip_suffix(')').and_then(|x| x.rsplit_once(" (")) {
+        Some((head, y)) if y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()) => head.trim_end().to_string(),
+        _ => t.to_string(),
+    }
+}
+
+fn norm(x: &str) -> String {
+    strip_year_suffix(x).chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Strips a size segment ("/original", "/w780", "/h632") and trailing slashes; true if changed.
+pub fn normalize_image_base(b: &str) -> (String, bool) {
+    let t = b.trim_end_matches('/');
+    let t = match t.rsplit_once('/') {
+        Some((head, seg)) if seg == "original" || (seg.len() > 1 && seg[1..].chars().all(|c| c.is_ascii_digit()) && matches!(&seg[..1], "w" | "h")) => head,
+        _ => t,
+    };
+    (t.to_string(), t != b)
+}
+
+/// Original-language name, when kept and different from the display name.
+fn put_original(m: &mut Meta, keep: bool, key: &str, orig: Option<String>, shown: Option<&String>) {
+    if keep {
+        put(m, key, orig.filter(|o| Some(o) != shown));
+    }
+}
+
 pub fn imdb_id(x: &str) -> Option<String> {
     digits_after(x, "tt").map(|d| format!("tt{d}"))
 }
@@ -184,6 +233,32 @@ impl Tmdb<'_> {
     }
 }
 
+/// Meta key a provider uses for a non-fatal warning (removed before merging).
+pub const WARNING: &str = "_warning";
+
+impl Tmdb<'_> {
+    /// S/E as numbered, else via episode groups (season = group order), else absolute numbering in season 1.
+    fn episode(&self, id: &str, d: &Value, se: u32, ep: u32) -> Option<Value> {
+        if let Ok(e) = self.get(&format!("/tv/{id}/season/{se}/episode/{ep}"), &[]) {
+            return Some(e);
+        }
+        if let Ok(g) = self.get(&format!("/tv/{id}/episode_groups"), &[]) {
+            for gid in g["results"].as_array().into_iter().flatten().filter_map(|r| s(&r["id"])) {
+                let Ok(x) = self.get(&format!("/tv/episode_group/{gid}"), &[]) else { continue };
+                let grp = x["groups"].as_array().into_iter().flatten().find(|v| v["order"].as_u64() == Some(se as u64));
+                if let Some(e) = grp.and_then(|v| v["episodes"].as_array()?.iter().find(|e| e["order"].as_u64() == Some(ep as u64 - 1)).cloned()) {
+                    return Some(e);
+                }
+            }
+        }
+        let before: u64 = d["seasons"].as_array().into_iter().flatten().filter(|v| v["season_number"].as_u64().is_some_and(|n| n >= 1 && n < se as u64)).filter_map(|v| v["episode_count"].as_u64()).sum();
+        if se > 1 && before > 0 {
+            return self.get(&format!("/tv/{id}/season/1/episode/{}", before + ep as u64), &[]).ok();
+        }
+        None
+    }
+}
+
 impl Provider for Tmdb<'_> {
     fn name(&self) -> &'static str {
         "tmdb"
@@ -212,6 +287,8 @@ impl Provider for Tmdb<'_> {
         let Some(id) = id else { return Ok(None) };
         let d = self.get(&format!("/{}/{id}", if tv { "tv" } else { "movie" }), &[("append_to_response", "external_ids,images".into()), ("include_image_language", format!("{},null", self.cfg.image_language))])?;
         let mut m = Meta::new();
+        let name = s(&d[if tv { "name" } else { "title" }]);
+        put_original(&mut m, self.cfg.keep_original, "original_title", s(&d[if tv { "original_name" } else { "original_title" }]), name.as_ref());
         let date = s(&d[if tv { "first_air_date" } else { "release_date" }]);
         put(&mut m, "year", date.as_ref().map(|x| x.chars().take(4).collect()));
         put(&mut m, "description", s(&d["overview"]));
@@ -230,8 +307,11 @@ impl Provider for Tmdb<'_> {
         if tv {
             put(&mut m, "tmdb_series_id", Some(id.clone()));
             m.insert("kind".into(), "episode".into());
-            put(&mut m, "show", s(&d["name"]));
-            put(&mut m, "title", s(&d["name"]));
+            put(&mut m, "show", name.clone());
+            put(&mut m, "title", name);
+            if let Some(o) = m.get("original_title").cloned() {
+                m.insert("original_show".into(), o);
+            }
             if let Some(se) = q.season {
                 // season poster is optional; ignore failures
                 if let Ok(sd) = self.get(&format!("/tv/{id}/season/{se}"), &[]) {
@@ -239,9 +319,13 @@ impl Provider for Tmdb<'_> {
                 }
             }
             if let (Some(se), Some(ep)) = (q.season, q.episode) {
-                let e = self.get(&format!("/tv/{id}/season/{se}/episode/{ep}"), &[])?;
                 m.insert("season".into(), se.to_string());
                 m.insert("episode".into(), ep.to_string());
+                // a missing episode (other numbering) keeps the series data; other providers fill in
+                let Some(e) = self.episode(&id, &d, se, ep) else {
+                    m.insert(WARNING.into(), format!("no S{se:02}E{ep:02} in TMDB (tried episode groups and absolute numbering); series data only"));
+                    return Ok(Some(m));
+                };
                 put(&mut m, "episode_title", s(&e["name"]));
                 put(&mut m, "description", s(&e["overview"]));
                 put(&mut m, "date", s(&e["air_date"]));
@@ -250,7 +334,7 @@ impl Provider for Tmdb<'_> {
             }
         } else {
             m.insert("kind".into(), "movie".into());
-            put(&mut m, "title", s(&d["title"]));
+            put(&mut m, "title", name);
             put(&mut m, "date", date);
         }
         Ok(Some(m))
@@ -286,6 +370,34 @@ impl<'a> Tvdb<'a> {
 }
 
 impl Tvdb<'_> {
+    /// `/<kind>/<id>/translations/<language>` (Null if none).
+    fn translation(&self, kind: &str, id: &str) -> Value {
+        if self.cfg.language.is_empty() {
+            return Value::Null;
+        }
+        self.get(&format!("/{kind}/{id}/translations/{}", self.cfg.language)).unwrap_or(Value::Null)
+    }
+    /// Best search hit: exact title (any name/translation/alias), the query year, not a future entry, then relevance.
+    fn best(&self, r: &Value, q: &Query) -> Option<String> {
+        let now: u64 = 1970 + std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 31_556_952);
+        let want = norm(&q.title);
+        let hits = r.as_array()?;
+        let key = |h: &Value| {
+            let mut names: Vec<String> = [&h["name"], &h["name_translated"]].iter().filter_map(|v| s(v)).collect();
+            for v in [&h["translations"], &h["aliases"]] {
+                match v {
+                    Value::Object(o) => names.extend(o.values().filter_map(s)),
+                    Value::Array(a) => names.extend(a.iter().filter_map(s)),
+                    _ => {}
+                }
+            }
+            let year = s(&h["year"]).and_then(|y| y.parse::<u64>().ok());
+            let exact = names.iter().any(|n| norm(n) == want);
+            let year_ok = q.year.as_ref().is_none_or(|y| year.map(|x| x.to_string()) == Some(y.clone()));
+            (!exact, !year_ok, year.is_some_and(|y| y > now))
+        };
+        hits.iter().enumerate().min_by_key(|(i, h)| (key(h), *i)).and_then(|(_, h)| s(&h["tvdb_id"]))
+    }
     /// Movie search (only when the type is forced to movie).
     fn movie(&self, q: &Query) -> Result<Option<Meta>, String> {
         let id = match q.thetvdb.as_deref().filter(|x| x.chars().all(|c| c.is_ascii_digit())) {
@@ -293,7 +405,7 @@ impl Tvdb<'_> {
             None if !q.title.is_empty() => {
                 let yr = q.year.as_ref().map(|y| format!("&year={}", enc(y))).unwrap_or_default();
                 let r = self.get(&format!("/search?type=movie&query={}{yr}", enc(&q.title)))?;
-                let Some(id) = s(&r[0]["tvdb_id"]) else { return Ok(None) };
+                let Some(id) = self.best(&r, q) else { return Ok(None) };
                 id
             }
             None => return Ok(None),
@@ -301,7 +413,12 @@ impl Tvdb<'_> {
         let d = self.get(&format!("/movies/{id}"))?;
         let mut m = Meta::new();
         m.insert("kind".into(), "movie".into());
-        put(&mut m, "title", s(&d["name"]));
+        let orig = s(&d["name"]).map(|n| strip_year_suffix(&n));
+        let tr = self.translation("movies", &id);
+        let name = s(&tr["name"]).map(|n| strip_year_suffix(&n)).or(orig.clone());
+        put_original(&mut m, self.cfg.keep_original, "original_title", orig, name.as_ref());
+        put(&mut m, "title", name);
+        put(&mut m, "description", s(&tr["overview"]).or(s(&d["overview"])));
         put(&mut m, "year", s(&d["year"]));
         put(&mut m, "poster_url", s(&d["image"]));
         put(&mut m, "thetvdb_id", Some(id));
@@ -329,7 +446,7 @@ impl Provider for Tvdb<'_> {
             _ if !q.title.is_empty() => {
                 let yr = q.year.as_ref().map(|y| format!("&year={}", enc(y))).unwrap_or_default();
                 let r = self.get(&format!("/search?type=series&query={}{yr}", enc(&q.title)))?;
-                let Some(id) = s(&r[0]["tvdb_id"]) else { return Ok(None) };
+                let Some(id) = self.best(&r, q) else { return Ok(None) };
                 self.get(&format!("/series/{id}"))?
             }
             _ => return Ok(None),
@@ -337,10 +454,17 @@ impl Provider for Tvdb<'_> {
         let Some(id) = s(&series["id"]) else { return Ok(None) };
         let mut m = Meta::new();
         m.insert("kind".into(), "episode".into());
-        put(&mut m, "show", s(&series["name"]));
-        put(&mut m, "title", s(&series["name"]));
-        put(&mut m, "year", s(&series["year"]));
-        put(&mut m, "description", s(&series["overview"]));
+        // `name` is the original-language name (may carry a " (YYYY)" disambiguator); `year` can be off,
+        // so the year comes from firstAired.
+        let orig = s(&series["name"]).map(|n| strip_year_suffix(&n));
+        let tr = self.translation("series", &id);
+        let name = s(&tr["name"]).map(|n| strip_year_suffix(&n)).or(orig.clone());
+        put_original(&mut m, self.cfg.keep_original, "original_show", orig.clone(), name.as_ref());
+        put_original(&mut m, self.cfg.keep_original, "original_title", orig, name.as_ref());
+        put(&mut m, "show", name.clone());
+        put(&mut m, "title", name);
+        put(&mut m, "year", s(&series["firstAired"]).map(|d| d.chars().take(4).collect()).or(s(&series["year"])));
+        put(&mut m, "description", s(&tr["overview"]).or(s(&series["overview"])));
         let img = |u: Option<String>| match self.cfg.poster_size.as_str() {
             "thumbnail" => u.map(|u| match u.rfind('.') {
                 Some(i) if !u[i..].contains('/') => format!("{}_t{}", &u[..i], &u[i..]),
@@ -364,12 +488,20 @@ impl Provider for Tvdb<'_> {
         put(&mut m, "thetvdb_id", Some(id.clone()));
         put(&mut m, "thetvdb_series_id", Some(id.clone()));
         if let (Some(se), Some(ep)) = (q.season, q.episode) {
-            let r = self.get(&format!("/series/{id}/episodes/default?page=0&season={se}&episodeNumber={ep}"))?;
-            let e = &r["episodes"][0];
             m.insert("season".into(), se.to_string());
             m.insert("episode".into(), ep.to_string());
-            put(&mut m, "episode_title", s(&e["name"]));
-            put(&mut m, "description", s(&e["overview"]));
+            let r = self.get(&format!("/series/{id}/episodes/default?page=0&season={se}&episodeNumber={ep}"));
+            let e = r.map(|r| r["episodes"][0].clone()).unwrap_or(Value::Null);
+            if e.is_null() {
+                m.insert(WARNING.into(), format!("no S{se:02}E{ep:02} in TheTVDB (default order); series data only"));
+                return Ok(Some(m));
+            }
+            let tr = s(&e["id"]).map_or(Value::Null, |eid| self.translation("episodes", &eid));
+            let orig = s(&e["name"]);
+            let name = s(&tr["name"]).or(orig.clone());
+            put_original(&mut m, self.cfg.keep_original, "original_episode_title", orig, name.as_ref());
+            put(&mut m, "episode_title", name);
+            put(&mut m, "description", s(&tr["overview"]).or(s(&e["overview"])));
             put(&mut m, "date", s(&e["aired"]));
             put(&mut m, "thetvdb_episode_id", s(&e["id"]));
             put(&mut m, "still_url", s(&e["image"]));
@@ -474,6 +606,33 @@ mod tests {
     fn tmdb(h: &FakeHttp) -> Tmdb<'_> {
         let cfg = TmdbCfg { read_token: "tok".into(), base_url: "http://t".into(), image_base: "http://img".into(), language: "en-US".into(), ..Default::default() };
         Tmdb { cfg, http: h }
+    }
+
+    #[test]
+    fn tmdb_episode_group_and_absolute_fallbacks() {
+        let q = Query { title: "Show".into(), season: Some(2), episode: Some(3), ..Default::default() };
+        let det = json!({"name":"Show","seasons":[{"season_number":0,"episode_count":5},{"season_number":1,"episode_count":10},{"season_number":2,"episode_count":4}]});
+        let h = FakeHttp::new(vec![
+            ("/search/tv", json!({"results":[{"id":7}]})),
+            ("/tv/7/episode_groups", json!({"results":[{"id":"g1"}]})),
+            ("/tv/episode_group/g1", json!({"groups":[{"order":2,"episodes":[{"name":"x"},{"order":2,"name":"Grouped"}]}]})),
+            ("/tv/7?", det.clone()),
+        ]);
+        assert_eq!(tmdb(&h).lookup(&q).unwrap().unwrap()["episode_title"], "Grouped");
+        let h = FakeHttp::new(vec![
+            ("/search/tv", json!({"results":[{"id":7}]})),
+            ("/tv/7/season/1/episode/13", json!({"name":"Absolute"})),
+            ("/tv/7?", det),
+        ]);
+        let m = tmdb(&h).lookup(&q).unwrap().unwrap();
+        assert_eq!((m["episode_title"].as_str(), m.contains_key(WARNING)), ("Absolute", false));
+    }
+
+    #[test]
+    fn helpers() {
+        assert_eq!(strip_year_suffix("薬屋のひとりごと (2027)"), "薬屋のひとりごと");
+        assert_eq!(normalize_image_base("https://i/t/p/w500/"), ("https://i/t/p".into(), true));
+        assert_eq!(normalize_image_base("https://i/t/p"), ("https://i/t/p".into(), false));
     }
 
     #[test]

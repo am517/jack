@@ -12,6 +12,8 @@ pub struct MatchCfg {
     pub movie_patterns: Vec<String>,
     pub cleanup: Vec<String>,
     pub show_from_parent_dir: bool,
+    /// Use the text after SxxExx (minus cleanup junk) as the episode title when no provider has one.
+    pub episode_title_from_filename: bool,
 }
 
 fn re(p: &str) -> Result<Regex, String> {
@@ -36,6 +38,7 @@ pub fn parse(path: &Path, cfg: &MatchCfg, kind: Option<&str>) -> Result<Query, S
         if let Some(c) = re(p)?.captures(&stem) {
             q.season = c.name("season").and_then(|m| m.as_str().parse().ok());
             q.episode = c.name("episode").and_then(|m| m.as_str().parse().ok());
+            q.episode_title = Some(tidy(&stem[c.get(0).map_or(0, |m| m.end())..], cfg)?).filter(|t| !t.is_empty());
             q.title = tidy(c.name("show").map_or("", |m| m.as_str()), cfg)?;
             if q.title.is_empty() && cfg.show_from_parent_dir {
                 let dir = path.parent().and_then(|d| d.file_name()).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
@@ -80,7 +83,9 @@ mod tests {
         let q = parse(Path::new("Blade Runner 2049 (2017).mp4"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.year.as_deref()), ("Blade Runner 2049", Some("2017")));
         let q = parse(Path::new("Saiki.K.S01E02.720p.WEB-DL.mkv"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.season, q.episode), ("Saiki K", Some(1), Some(2)));
+        assert_eq!((q.title.as_str(), q.season, q.episode, q.episode_title), ("Saiki K", Some(1), Some(2), None));
+        let q = parse(Path::new("The.Apothecary.Diaries.S03E01.Locusts.REPACK.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mp4"), &cfg(), None).unwrap();
+        assert_eq!((q.title.as_str(), q.season, q.episode, q.episode_title.as_deref()), ("The Apothecary Diaries", Some(3), Some(1), Some("Locusts")));
         let q = parse(Path::new("Show/Season 2/2x05.m4v"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.season, q.episode), ("Show", Some(2), Some(5)));
         let q = parse(Path::new("home video.mp4"), &cfg(), None).unwrap();

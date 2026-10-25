@@ -58,6 +58,15 @@ written with the same tag maps (MP4 freeform atoms, e.g. `IMDB_RATING`; MKV simp
 `LAW_RATING`), plus the iTunes content rating (iTunEXTC) for `rated`. Without a key it is skipped
 with a warning.
 
+### Languages and naming
+
+- `[providers] language = "en"` sets the metadata/tag language (TMDB `language`, TheTVDB translations via `language_codes`, e.g. en -> eng).
+- `keep_original = true` also stores original-language names (`original_title`, `original_show`, `original_episode_title`) in meta.json, `--print`, MP4 freeform atoms (`ORIGINAL_TITLE`, ...) and MKV tags; `original_in_description` appends the original title to the description. Templates can use `{original_title}` / `{original_show}`.
+- `[naming] file_language` (default `"original"`) and `folder_language` (default `"en"`) pick names for files and folders, e.g. `TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗.mp4`. Missing names fall back to the other language. Save with `--set --file-language en --folder-language original`.
+- Names are NFC-normalized, illegal/control characters replaced, trailing dots/spaces trimmed, and each component capped at `max_component_bytes` (255).
+- `tv_show_year = true` adds `(YYYY)` to show names; `[matching] episode_title_from_filename` uses the filename's episode title when providers have none.
+- `image_base` should be the bare TMDB image root (`https://image.tmdb.org/t/p`); a trailing `/original` or `/wNNN` is stripped with a warning.
+
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:
