@@ -1,6 +1,8 @@
 mod config;
+mod matcher;
 mod meta;
 mod providers;
+mod sorter;
 mod tagger;
 
 use clap::Parser;
@@ -76,22 +78,20 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
     out
 }
 
-/// Query from the filename (title only until phase 4 matching) plus ids from flags/sidecar.
-fn query(path: &Path, s: &Settings) -> Query {
-    Query {
-        title: path.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(),
-        imdb: s.imdb.clone(),
-        tmdb: s.tmdb.clone(),
-        thetvdb: s.thetvdb.clone(),
-        ..Default::default()
-    }
+/// Query from the filename plus ids from flags/sidecar.
+fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
+    let mut q = matcher::parse(path, &cfg.matching)?;
+    q.imdb = s.imdb.clone();
+    q.tmdb = s.tmdb.clone();
+    q.thetvdb = s.thetvdb.clone();
+    Ok(q)
 }
 
-/// Metadata for one file from online providers (first provider with a result wins).
-fn fetch(q: &Query, cfg: &Config, http: &dyn Http) -> Result<Meta, String> {
+/// Composite metadata from all providers in [providers] order, merged per [merge].
+fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<Meta, String> {
     let tmdb = Tmdb { cfg: cfg.providers.tmdb.clone(), http };
     let tvdb = Tvdb::new(cfg.providers.thetvdb.clone(), http);
-    let mut errs = vec![];
+    let (mut found, mut errs) = (vec![], vec![]);
     for name in &cfg.providers.order {
         let p: &dyn Provider = match name.as_str() {
             "tmdb" => &tmdb,
@@ -99,12 +99,18 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http) -> Result<Meta, String> {
             x => return Err(format!("[providers] order: unknown provider '{x}'")),
         };
         match p.lookup(q) {
-            Ok(Some(m)) => return Ok(m),
+            Ok(Some(m)) => found.push((name.clone(), m)),
             Ok(None) => {}
             Err(e) => errs.push(format!("{}: {e}", p.name())),
         }
     }
-    Err(if errs.is_empty() { format!("no match for '{}'", q.title) } else { errs.join("; ") })
+    if found.is_empty() {
+        return Err(if errs.is_empty() { format!("no match for '{}'", q.title) } else { errs.join("; ") });
+    }
+    for e in errs {
+        let _ = writeln!(out, "    warning: {e}");
+    }
+    Ok(sorter::merge(&found, &cfg.merge))
 }
 
 fn save_poster(path: &Path, s: &Settings, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
@@ -123,7 +129,7 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
         Some(f) => meta::load(f)?,
         None => {
-            let mut m = fetch(&query(path, s), cfg, http)?;
+            let mut m = fetch(&query(path, s, cfg)?, cfg, http, out)?;
             if !dry && (Settings::flag(s.download_only) || cfg.tagger.embed_artwork) {
                 save_poster(path, s, &mut m, http)?;
             }
@@ -145,6 +151,13 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
     let _ = writeln!(out, "    tag: {}", tagger::show(&cmd));
     if !dry {
         tagger::run(&cmd)?;
+    }
+    if let Some(root) = &s.output {
+        let to = sorter::destination(root, path, &meta, &cfg.sort);
+        let _ = writeln!(out, "    {}: {}", cfg.sort.mode, to.display());
+        if !dry {
+            sorter::apply(path, &to, &cfg.sort)?;
+        }
     }
     Ok(())
 }
@@ -269,6 +282,10 @@ mod tests {
         assert_eq!(failed, 0, "{out}");
         assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
         assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
+        let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap(), "-o", "/srt"]);
+        let (out, _) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        assert!(out.contains("move: /srt/Movies/The Matrix (1999)/The Matrix (1999).m4v"), "{out}");
+        assert!(!Path::new("/srt").exists());
         assert_eq!(fs::read(&m).unwrap(), b"x"); // untouched
     }
 

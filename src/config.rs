@@ -68,6 +68,9 @@ pub struct Config {
     pub base: Settings,
     pub tagger: TaggerCfg,
     pub providers: crate::providers::ProvidersCfg,
+    pub merge: crate::sorter::MergeCfg,
+    pub matching: crate::matcher::MatchCfg,
+    pub sort: crate::sorter::SortCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {

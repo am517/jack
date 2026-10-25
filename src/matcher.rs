@@ -1,0 +1,82 @@
+//! Filename -> lookup query.
+use crate::providers::Query;
+use regex::Regex;
+use serde::Deserialize;
+use std::path::Path;
+
+#[derive(Deserialize, Debug, Default, Clone)]
+#[serde(default)]
+pub struct MatchCfg {
+    pub separators: String,
+    pub tv_patterns: Vec<String>,
+    pub movie_patterns: Vec<String>,
+    pub cleanup: Vec<String>,
+    pub show_from_parent_dir: bool,
+}
+
+fn re(p: &str) -> Result<Regex, String> {
+    Regex::new(p).map_err(|e| format!("[matching] bad regex {p:?}: {e}"))
+}
+
+fn tidy(s: &str, cfg: &MatchCfg) -> Result<String, String> {
+    let mut s = s.to_string();
+    for c in &cfg.cleanup {
+        s = re(c)?.replace_all(&s, " ").into_owned();
+    }
+    Ok(s.split_whitespace().collect::<Vec<_>>().join(" ").trim_matches(|c: char| " -([".contains(c)).to_string())
+}
+
+pub fn parse(path: &Path, cfg: &MatchCfg) -> Result<Query, String> {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = if cfg.separators.is_empty() { stem } else { re(&cfg.separators)?.replace_all(&stem, " ").into_owned() };
+    let mut q = Query::default();
+    for p in &cfg.tv_patterns {
+        if let Some(c) = re(p)?.captures(&stem) {
+            q.season = c.name("season").and_then(|m| m.as_str().parse().ok());
+            q.episode = c.name("episode").and_then(|m| m.as_str().parse().ok());
+            q.title = tidy(c.name("show").map_or("", |m| m.as_str()), cfg)?;
+            if q.title.is_empty() && cfg.show_from_parent_dir {
+                let dir = path.parent().and_then(|d| d.file_name()).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+                let dir = if dir.to_lowercase().starts_with("season") {
+                    path.parent().and_then(|d| d.parent()).and_then(|d| d.file_name()).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()
+                } else {
+                    dir
+                };
+                q.title = tidy(&re(&cfg.separators)?.replace_all(&dir, " "), cfg)?;
+            }
+            return Ok(q);
+        }
+    }
+    for p in &cfg.movie_patterns {
+        if let Some(c) = re(p)?.captures(&stem) {
+            q.title = tidy(c.name("title").map_or("", |m| m.as_str()), cfg)?;
+            q.year = c.name("year").map(|m| m.as_str().to_string());
+            return Ok(q);
+        }
+    }
+    q.title = tidy(&stem, cfg)?;
+    Ok(q)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> MatchCfg {
+        crate::config::load(Some(Path::new("config/jack.toml"))).unwrap().matching
+    }
+
+    #[test]
+    fn movies_and_tv() {
+        let q = parse(Path::new("The.Matrix.1999.1080p.BluRay.x264.mkv"), &cfg()).unwrap();
+        assert_eq!((q.title.as_str(), q.year.as_deref(), q.season), ("The Matrix", Some("1999"), None));
+        let q = parse(Path::new("Blade Runner 2049 (2017).mp4"), &cfg()).unwrap();
+        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Blade Runner 2049", Some("2017")));
+        let q = parse(Path::new("Saiki.K.S01E02.720p.WEB-DL.mkv"), &cfg()).unwrap();
+        assert_eq!((q.title.as_str(), q.season, q.episode), ("Saiki K", Some(1), Some(2)));
+        let q = parse(Path::new("Show/Season 2/2x05.m4v"), &cfg()).unwrap();
+        assert_eq!((q.title.as_str(), q.season, q.episode), ("Show", Some(2), Some(5)));
+        let q = parse(Path::new("home video.mp4"), &cfg()).unwrap();
+        assert_eq!((q.title.as_str(), q.year), ("home video", None));
+    }
+}
