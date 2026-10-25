@@ -83,6 +83,9 @@ pub struct TaggerCfg {
     pub embed_artwork: bool,
     pub short_description_max: usize,
     pub mkvextract: String,
+    pub mkvmerge: String,
+    pub tv_poster: Vec<String>,
+    pub mkv_cover_name: String,
     /// rDNS domain ("mean") for MP4 freeform id atoms.
     pub id_domain: String,
     /// Metadata id key -> MP4 freeform atom name.
@@ -156,7 +159,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
         }
     }
     let mut c: Config = v.try_into().map_err(|e| format!("config: {e}"))?;
-    for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract] {
+    for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract, &mut c.tagger.mkvmerge] {
         expand_s(s);
     }
     apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY);

@@ -100,10 +100,16 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
             a.extend(["--edit".into(), "info".into(), "--set".into(), format!("title={t}")]);
         }
         if let Some(p) = art {
-            for s in ["--attachment-name", "cover.jpg", "--attachment-mime-type", "image/jpeg", "--add-attachment"] {
-                a.push(s.into());
+            let n = &cfg.mkv_cover_name;
+            let has = output(&[&cfg.mkvmerge, "-J", &f]).and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok()).is_some_and(|j| {
+                j["attachments"].as_array().is_some_and(|v| v.iter().any(|x| x["file_name"].as_str() == Some(n)))
+            });
+            a.extend(["--attachment-name".into(), n.clone(), "--attachment-mime-type".into(), "image/jpeg".into()]);
+            if has {
+                a.extend(["--replace-attachment".into(), format!("name:{n}:{p}")]);
+            } else {
+                a.extend(["--add-attachment".into(), p.clone()]);
             }
-            a.push(p.clone());
         }
         let existing = output(&[&cfg.mkvextract, &f, "tags", "-"]).unwrap_or_default();
         if let Some(x) = mkv_tags_xml(m, cfg, &existing) {
@@ -129,6 +135,9 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
                     kv(&mut a, "--TVSeasonNum", m.get("season"));
                     kv(&mut a, "--TVEpisodeNum", m.get("episode"));
                     kv(&mut a, "--tracknum", m.get("episode"));
+                }
+                if art.is_some() {
+                    a.extend(["--artwork".into(), "REMOVE_ALL".into()]); // no duplicate covers
                 }
                 kv(&mut a, "--artwork", art);
                 rdns(&mut a, m, cfg);

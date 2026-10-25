@@ -69,12 +69,16 @@ pub struct TmdbCfg {
     pub api_key: String,
     pub base_url: String,
     pub image_base: String,
+    /// TMDB image size segment, e.g. "w780" or "original" (empty: none).
+    pub poster_size: String,
     pub language: String,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(default)]
 pub struct TvdbCfg {
+    /// "full" or "thumbnail" (TheTVDB's "_t" variant).
+    pub poster_size: String,
     pub api_key: String,
     pub pin: String,
     pub base_url: String,
@@ -144,7 +148,8 @@ impl Tmdb<'_> {
         self.http.get(&url, &h)
     }
     fn img(&self, v: &Value) -> Option<String> {
-        s(v).map(|p| format!("{}{p}", self.cfg.image_base))
+        let sz = if self.cfg.poster_size.is_empty() { String::new() } else { format!("/{}", self.cfg.poster_size) };
+        s(v).map(|p| format!("{}{sz}{p}", self.cfg.image_base.trim_end_matches('/')))
     }
 }
 
@@ -188,6 +193,12 @@ impl Provider for Tmdb<'_> {
             m.insert("kind".into(), "episode".into());
             put(&mut m, "show", s(&d["name"]));
             put(&mut m, "title", s(&d["name"]));
+            if let Some(se) = q.season {
+                // season poster is optional; ignore failures
+                if let Ok(sd) = self.get(&format!("/tv/{id}/season/{se}"), &[]) {
+                    put(&mut m, "season_poster_url", self.img(&sd["poster_path"]));
+                }
+            }
             if let (Some(se), Some(ep)) = (q.season, q.episode) {
                 let e = self.get(&format!("/tv/{id}/season/{se}/episode/{ep}"), &[])?;
                 m.insert("season".into(), se.to_string());
@@ -263,7 +274,21 @@ impl Provider for Tvdb<'_> {
         put(&mut m, "title", s(&series["name"]));
         put(&mut m, "year", s(&series["year"]));
         put(&mut m, "description", s(&series["overview"]));
-        put(&mut m, "poster_url", s(&series["image"]));
+        let img = |u: Option<String>| match self.cfg.poster_size.as_str() {
+            "thumbnail" => u.map(|u| match u.rfind('.') {
+                Some(i) if !u[i..].contains('/') => format!("{}_t{}", &u[..i], &u[i..]),
+                _ => u,
+            }),
+            _ => u,
+        };
+        put(&mut m, "poster_url", img(s(&series["image"])));
+        if let Some(se) = q.season {
+            if let Ok(x) = self.get(&format!("/series/{}/extended?short=true", s(&series["id"]).unwrap_or_default())) {
+                let ss = x["seasons"].as_array().cloned().unwrap_or_default();
+                let hit = ss.iter().find(|v| v["number"].as_u64() == Some(se as u64) && v["type"]["type"].as_str().is_none_or(|t| t == "official"));
+                put(&mut m, "season_poster_url", img(hit.and_then(|v| s(&v["image"]))));
+            }
+        }
         put(&mut m, "thetvdb_id", Some(id.clone()));
         put(&mut m, "thetvdb_series_id", Some(id.clone()));
         if let (Some(se), Some(ep)) = (q.season, q.episode) {
@@ -307,7 +332,11 @@ pub mod fake {
             self.hit(url)
         }
         fn bytes(&self, url: &str) -> Result<Vec<u8>, String> {
-            self.hit(url).map(|_| b"JPEG".to_vec())
+            // a route value "@<path>" serves that file's bytes
+            self.hit(url).map(|v| match v.as_str().and_then(|p| p.strip_prefix('@')) {
+                Some(p) => std::fs::read(p).unwrap(),
+                None => b"JPEG".to_vec(),
+            })
         }
     }
 }
@@ -338,6 +367,7 @@ mod tests {
     fn tmdb_tv_search_and_episode() {
         let h = FakeHttp::new(vec![
             ("/search/tv", json!({"results":[{"id":42}]})),
+            ("/tv/42/season/1?", json!({"poster_path":"/s1.jpg"})),
             ("/tv/42/season/1/episode/2", json!({"id":4202,"name":"Ep Two","air_date":"2016-07-11","overview":"o"})),
             ("/tv/42", json!({"name":"Saiki K","first_air_date":"2016-07-04","external_ids":{"imdb_id":"tt5"}})),
         ]);
@@ -345,6 +375,10 @@ mod tests {
         let m = tmdb(&h).lookup(&q).unwrap().unwrap();
         assert_eq!((m["show"].as_str(), m["episode_title"].as_str(), m["season"].as_str()), ("Saiki K", "Ep Two", "1"));
         assert!(h.calls.borrow().iter().any(|c| c.contains("query=Saiki%20K")));
+        assert_eq!(m["season_poster_url"], "http://img/s1.jpg");
+        let mut t = tmdb(&h);
+        t.cfg.poster_size = "w780".into();
+        assert_eq!(t.img(&json!("/x.jpg")).unwrap(), "http://img/w780/x.jpg");
         assert_eq!((m["tmdb_series_id"].as_str(), m["tmdb_episode_id"].as_str(), m["imdb_id"].as_str()), ("42", "4202", "tt5"));
     }
 
@@ -368,11 +402,13 @@ mod tests {
             ("/login", json!({"data":{"token":"T"}})),
             ("/series/slug/the-disastrous-life", json!({"data":{"id":7,"name":"Saiki K","year":"2016"}})),
             ("/series/7/episodes", json!({"data":{"episodes":[{"name":"E","aired":"2016-07-04"}]}})),
+            ("/series/7/extended", json!({"data":{"seasons":[{"number":1,"type":{"type":"dvd"},"image":"http://a/dvd.jpg"},{"number":1,"type":{"type":"official"},"image":"http://a/s1.jpg"}]}})),
         ]);
-        let t = Tvdb::new(TvdbCfg { api_key: "k".into(), pin: "1234".into(), base_url: "http://v".into() }, &h);
+        let t = Tvdb::new(TvdbCfg { api_key: "k".into(), pin: "1234".into(), base_url: "http://v".into(), poster_size: "thumbnail".into() }, &h);
         let q = Query { thetvdb: Some("https://www.thetvdb.com/series/the-disastrous-life".into()), season: Some(1), episode: Some(1), ..Default::default() };
         let m = t.lookup(&q).unwrap().unwrap();
         assert_eq!((m["show"].as_str(), m["episode_title"].as_str()), ("Saiki K", "E"));
+        assert_eq!(m["season_poster_url"], "http://a/s1_t.jpg");
         assert_eq!(h.calls.borrow().iter().filter(|c| c.contains("/login")).count(), 1);
         assert!(h.calls.borrow().iter().any(|c| c.contains("\"pin\":\"1234\"")));
         // movies are skipped; missing keys give clear errors

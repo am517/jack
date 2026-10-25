@@ -133,8 +133,14 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
     Ok(sorter::merge(&found, &cfg.merge))
 }
 
-fn save_poster(path: &Path, s: &Settings, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
-    if let Some(url) = meta.get("poster_url").cloned() {
+fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
+    let ep = meta.get("kind").is_some_and(|k| k == "episode");
+    let url = if ep {
+        cfg.tagger.tv_poster.iter().find_map(|c| meta.get(if c == "season" { "season_poster_url" } else { "poster_url" }).cloned())
+    } else {
+        meta.get("poster_url").cloned()
+    };
+    if let Some(url) = url {
         let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
         std::fs::write(&pp, http.bytes(&url)?).map_err(|e| format!("{}: {e}", pp.display()))?;
         meta.insert("poster_file".into(), pp.to_string_lossy().into_owned());
@@ -151,7 +157,7 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         None => {
             let mut m = fetch(&query(path, s, cfg)?, cfg, http, out)?;
             if !dry && (Settings::flag(s.download_only) || cfg.tagger.embed_artwork) {
-                save_poster(path, s, &mut m, http)?;
+                save_poster(path, s, cfg, &mut m, http)?;
             }
             m
         }
@@ -295,6 +301,51 @@ mod tests {
         assert_eq!((q.tmdb.as_deref(), q.thetvdb.as_deref(), q.imdb.as_deref()), (Some("/tv/42"), Some("7"), Some("tt5")));
         let s = Settings { thetvdb: Some("99".into()), ..Default::default() };
         assert_eq!(query(&m, &s, &cfg).unwrap().thetvdb.as_deref(), Some("99"));
+    }
+
+    /// Normal (non -d) runs embed art by default, TV picks the season poster, re-runs don't duplicate.
+    #[test]
+    fn integration_art_embedded_by_default() {
+        use serde_json::json;
+        use std::process::Command;
+        let ok = |t: &str| Command::new("which").arg(t).output().is_ok_and(|o| o.status.success());
+        if !["ffmpeg", "AtomicParsley", "exiftool", "mkvpropedit", "mkvmerge", "mkvextract"].iter().all(|t| ok(t)) {
+            return eprintln!("skip art: tools missing");
+        }
+        let d = tempfile::tempdir().unwrap();
+        let jpg = d.path().join("art.jpg");
+        assert!(Command::new("ffmpeg").args(["-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=8x8", "-frames:v", "1"]).arg(&jpg).status().unwrap().success());
+        let at = format!("@{}", jpg.display());
+        for (name, writer) in [("Saiki.K.S01E02.mp4", "atomicparsley"), ("Saiki.K.S01E02.m4v", "exiftool"), ("Saiki.K.S01E02.mkv", "atomicparsley")] {
+            let cfgp = d.path().join("c.toml");
+            fs::write(&cfgp, format!("[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\nimage_base = \"http://img\"\n[tagger]\nmp4_tool = \"{writer}\"\n")).unwrap();
+            let m = d.path().join(name);
+            assert!(Command::new("ffmpeg").args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.2", "-c:v", "mpeg4"]).arg(&m).status().unwrap().success());
+            let h = providers::fake::FakeHttp::new(vec![
+                ("/search/tv", json!({"results":[{"id":42}]})),
+                ("/tv/42/season/1/episode/2", json!({"id":9,"name":"Ep"})),
+                ("/tv/42/season/1?", json!({"poster_path":"/season.jpg"})),
+                ("/tv/42?", json!({"name":"Saiki K","poster_path":"/series.jpg"})),
+                ("/season.jpg", json!(at.clone())),
+            ]);
+            let c = cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap()]);
+            for _ in 0..2 {
+                let (out, failed) = run(&c, &h).unwrap();
+                assert_eq!(failed, 0, "{out}");
+            }
+            assert!(!h.calls.borrow().iter().any(|c| c.contains("/series.jpg")));
+            let f = m.to_str().unwrap();
+            let o = |a: &[&str]| String::from_utf8_lossy(&Command::new(a[0]).args(&a[1..]).output().unwrap().stdout).into_owned();
+            if name.ends_with("mkv") {
+                let j: serde_json::Value = serde_json::from_str(&o(&["mkvmerge", "-J", f])).unwrap();
+                let a = j["attachments"].as_array().unwrap();
+                assert_eq!(a.len(), 1, "{j}");
+                assert_eq!((a[0]["file_name"].as_str(), a[0]["content_type"].as_str()), (Some("cover.jpg"), Some("image/jpeg")));
+            } else {
+                assert!(o(&["AtomicParsley", f, "-t"]).contains("Atom \"covr\" contains: 1 piece of artwork"), "{name}");
+                assert_eq!(Command::new("exiftool").args(["-b", "-CoverArt", f]).output().unwrap().stdout, fs::read(&jpg).unwrap());
+            }
+        }
     }
 
     #[test]

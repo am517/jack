@@ -40,8 +40,15 @@ mkvpropedit = "mkvpropedit"
 mkvextract = "mkvextract"
 mp4_extensions = ["mp4", "m4v", "mov"]
 mkv_extensions = ["mkv"]
-# Embed downloaded poster art when tagging.
+# Artwork (like iVI4): on every normal run the poster is downloaded and embedded
+# (MP4 covr atom, replacing any existing art; MKV attachment, replacing an existing one).
 embed_artwork = true
+# TV episodes: poster choice in order, falling back to the next ("season", "series").
+tv_poster = ["season", "series"]
+# MKV cover attachment name (Matroska convention: cover.jpg).
+mkv_cover_name = "cover.jpg"
+# Used to list existing MKV attachments.
+mkvmerge = "mkvmerge"
 # AtomicParsley's short description is limited; longer text goes in the long description.
 short_description_max = 250
 
@@ -80,7 +87,9 @@ order = ["tmdb", "thetvdb"]
 read_token = ""
 api_key = ""
 base_url = "https://api.themoviedb.org/3"
-image_base = "https://image.tmdb.org/t/p/original"
+image_base = "https://image.tmdb.org/t/p"
+# Poster size: w92 w154 w185 w342 w500 w780 original.
+poster_size = "original"
 language = "en-US"
 
 [providers.thetvdb]
@@ -88,6 +97,8 @@ language = "en-US"
 api_key = ""
 pin = ""
 base_url = "https://api4.thetvdb.com/v4"
+# Poster size: "full" or "thumbnail".
+poster_size = "full"
 
 [merge]
 # Composite metadata: for each field, take the first provider in its list that has a value.
@@ -95,7 +106,9 @@ default = ["tmdb", "thetvdb"]
 [merge.fields]
 episode_title = ["thetvdb", "tmdb"]
 description = ["tmdb", "thetvdb"]
+# Artwork source preference (first provider with art wins).
 poster_url = ["tmdb", "thetvdb"]
+season_poster_url = ["tmdb", "thetvdb"]
 
 [matching]
 # Filename -> title. Applied to the file stem in order: separators become spaces,
