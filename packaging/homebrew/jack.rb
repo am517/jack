@@ -1,8 +1,8 @@
 class Jack < Formula
   desc "Tag and sort movie and TV files using TMDB and TheTVDB metadata"
   homepage "https://github.com/am517/jack"
-  url "https://github.com/am517/jack/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "0d951905eab0fce7a18cc57b2235da18f497c755a9e930c645e36df05943afd9"
+  url "https://github.com/am517/jack/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "70a752183d9e6ea54ff56d1acd829f103a83e19f47d870a1bb0b416376d3378a"
   license "MIT"
   head "https://github.com/am517/jack.git", branch: "main"
 
