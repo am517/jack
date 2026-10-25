@@ -1,10 +1,12 @@
 mod config;
 mod meta;
+mod providers;
 mod tagger;
 
 use clap::Parser;
 use config::{Config, Settings, has_ext, suffixed};
 use meta::Meta;
+use providers::{Http, Provider, Query, Tmdb, Tvdb};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -74,19 +76,63 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
     out
 }
 
-/// Metadata for one file from online providers.
-fn fetch(_path: &Path, _s: &Settings, _cfg: &Config) -> Result<Meta, String> {
-    Err("no metadata providers yet (phase 3); use --from-file".into())
+/// Query from the filename (title only until phase 4 matching) plus ids from flags/sidecar.
+fn query(path: &Path, s: &Settings) -> Query {
+    Query {
+        title: path.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(),
+        imdb: s.imdb.clone(),
+        tmdb: s.tmdb.clone(),
+        thetvdb: s.thetvdb.clone(),
+        ..Default::default()
+    }
 }
 
-fn process(path: &Path, s: &Settings, cfg: &Config, out: &mut String) -> Result<(), String> {
+/// Metadata for one file from online providers (first provider with a result wins).
+fn fetch(q: &Query, cfg: &Config, http: &dyn Http) -> Result<Meta, String> {
+    let tmdb = Tmdb { cfg: cfg.providers.tmdb.clone(), http };
+    let tvdb = Tvdb::new(cfg.providers.thetvdb.clone(), http);
+    let mut errs = vec![];
+    for name in &cfg.providers.order {
+        let p: &dyn Provider = match name.as_str() {
+            "tmdb" => &tmdb,
+            "thetvdb" => &tvdb,
+            x => return Err(format!("[providers] order: unknown provider '{x}'")),
+        };
+        match p.lookup(q) {
+            Ok(Some(m)) => return Ok(m),
+            Ok(None) => {}
+            Err(e) => errs.push(format!("{}: {e}", p.name())),
+        }
+    }
+    Err(if errs.is_empty() { format!("no match for '{}'", q.title) } else { errs.join("; ") })
+}
+
+fn save_poster(path: &Path, s: &Settings, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
+    if let Some(url) = meta.get("poster_url").cloned() {
+        let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
+        std::fs::write(&pp, http.bytes(&url)?).map_err(|e| format!("{}: {e}", pp.display()))?;
+        meta.insert("poster_file".into(), pp.to_string_lossy().into_owned());
+    }
+    Ok(())
+}
+
+fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(), String> {
     let dry = Settings::flag(s.dry_run);
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
     let meta = match &s.from_file {
         Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
         Some(f) => meta::load(f)?,
-        None => fetch(path, s, cfg)?,
+        None => {
+            let mut m = fetch(&query(path, s), cfg, http)?;
+            if !dry && (Settings::flag(s.download_only) || cfg.tagger.embed_artwork) {
+                save_poster(path, s, &mut m, http)?;
+            }
+            m
+        }
     };
+    if s.youtube.is_some() {
+        let _ = writeln!(out, "    note: --youtube is not supported yet (later phase)");
+    }
     if Settings::flag(s.download_only) {
         let mp = suffixed(path, msuf);
         if !dry {
@@ -112,7 +158,7 @@ fn ids(s: &Settings) -> String {
 }
 
 /// Returns (report text, number of failed files).
-fn run(cli: &Cli) -> Result<(String, usize), String> {
+fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
     let cfg = config::load(cli.config.as_deref())?;
     let flags = Settings::from(cli);
     let files = scan(&cli.paths, &cfg.base);
@@ -123,7 +169,7 @@ fn run(cli: &Cli) -> Result<(String, usize), String> {
         let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
             let _ = writeln!(o, "{}{}", p.display(), if side { "  [sidecar]" } else { "" });
             let _ = writeln!(o, "    ids: {}", ids(&s));
-            process(&p, &s, &cfg, &mut o)
+            process(&p, &s, &cfg, http, &mut o)
         });
         if let Err(e) = r {
             failed += 1;
@@ -135,7 +181,7 @@ fn run(cli: &Cli) -> Result<(String, usize), String> {
 
 fn main() {
     let cli = Cli::parse();
-    match run(&cli) {
+    match run(&cli, &providers::Ureq) {
         Ok((s, failed)) => {
             print!("{s}");
             if failed > 0 {
@@ -219,7 +265,7 @@ mod tests {
         let mf = d.path().join("m.m4v.meta.json");
         fs::write(&mf, r#"{"kind":"movie","title":"The Matrix","year":"1999"}"#).unwrap();
         let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap()]);
-        let (out, failed) = run(&c).unwrap();
+        let (out, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
         assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
@@ -236,9 +282,31 @@ mod tests {
         let src = d.path().join("src.json");
         fs::write(&src, r#"{"kind":"movie","title":"T"}"#).unwrap();
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-f", src.to_str().unwrap()]);
-        let (out, failed) = run(&c).unwrap();
+        let (out, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert_eq!(meta::load(&d.path().join("m.mkv.meta.json")).unwrap()["title"], "T");
+        assert_eq!(fs::read(&m).unwrap(), b"x");
+    }
+
+    #[test]
+    fn download_only_fetches_via_providers() {
+        use serde_json::json;
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("c.toml");
+        fs::write(&cfg, "[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n").unwrap();
+        let m = d.path().join("The Matrix.mp4");
+        fs::write(&m, "x").unwrap();
+        let h = providers::fake::FakeHttp::new(vec![
+            ("/search/movie", json!({"results":[{"id":603}]})),
+            ("/movie/603", json!({"title":"The Matrix","release_date":"1999-03-30","poster_path":"/p.jpg"})),
+            ("/p.jpg", json!(null)),
+        ]);
+        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d"]);
+        let (out, failed) = run(&c, &h).unwrap();
+        assert_eq!(failed, 0, "{out}");
+        let meta = meta::load(&d.path().join("The Matrix.mp4.meta.json")).unwrap();
+        assert_eq!(meta["year"], "1999");
+        assert_eq!(fs::read(d.path().join("The Matrix.mp4.poster.jpg")).unwrap(), b"JPEG");
         assert_eq!(fs::read(&m).unwrap(), b"x");
     }
 

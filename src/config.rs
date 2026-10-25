@@ -12,6 +12,7 @@ pub struct Settings {
     pub recursive: Option<bool>,
     pub sidecar_suffix: Option<String>,
     pub meta_suffix: Option<String>,
+    pub poster_suffix: Option<String>,
     pub output: Option<PathBuf>,
     pub dry_run: Option<bool>,
     pub download_only: Option<bool>,
@@ -31,6 +32,7 @@ impl Settings {
             recursive: self.recursive.or(l.recursive),
             sidecar_suffix: self.sidecar_suffix.or(l.sidecar_suffix),
             meta_suffix: self.meta_suffix.or(l.meta_suffix),
+            poster_suffix: self.poster_suffix.or(l.poster_suffix),
             output: self.output.or(l.output),
             dry_run: self.dry_run.or(l.dry_run),
             download_only: self.download_only.or(l.download_only),
@@ -65,6 +67,7 @@ pub struct Config {
     #[serde(flatten)]
     pub base: Settings,
     pub tagger: TaggerCfg,
+    pub providers: crate::providers::ProvidersCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {

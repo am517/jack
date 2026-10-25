@@ -37,3 +37,24 @@ mkv_extensions = ["mkv"]
 embed_artwork = true
 # AtomicParsley's short description is limited; longer text goes in the long description.
 short_description_max = 250
+
+# Saved poster art: "<filename><poster_suffix>" (used by --download-only and embedding).
+poster_suffix = ".poster.jpg"
+
+[providers]
+# Providers to query, in order. (IMDb ids given with --imdb are resolved through TMDB.)
+order = ["tmdb", "thetvdb"]
+
+[providers.tmdb]
+# Get one at https://www.themoviedb.org/settings/api. Set read_token (preferred) or api_key.
+read_token = ""
+api_key = ""
+base_url = "https://api.themoviedb.org/3"
+image_base = "https://image.tmdb.org/t/p/original"
+language = "en-US"
+
+[providers.thetvdb]
+# Get one at https://thetvdb.com/api-information. pin only if your key is a user-supported key.
+api_key = ""
+pin = ""
+base_url = "https://api4.thetvdb.com/v4"
