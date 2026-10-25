@@ -7,7 +7,14 @@ Rust CLI that tags and sorts movie and TV files (replaces iVI4 Pro). First app i
 
 Status: phases 1-4 done: CLI, config + sidecar, scan, tag writing, TMDB/TheTVDB lookup, filename matching, composite merge, sort/rename.
 
-## Setup (macOS, zsh)
+## Install
+
+```zsh
+brew install am517/tap/jack
+mkdir -p ~/.config/windups/jack && cp "$(brew --prefix)/share/jack/config.toml.example" ~/.config/windups/jack/config.toml
+```
+
+## Build from source (macOS, zsh)
 
 ```zsh
 brew install atomicparsley exiftool mkvtoolnix
@@ -51,3 +58,7 @@ Config `[providers.tmdb] read_token`/`api_key` and `[providers.thetvdb] api_key`
 - This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org
 
 Both lines are also shown in `jack --help`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
