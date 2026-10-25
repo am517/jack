@@ -34,6 +34,7 @@ jack --set --art landscape --providers tmdb,omdb      # save flags as defaults i
 jack ~/TV/saiki-k/ --thetvdb https://www.thetvdb.com/series/the-disastrous-life-of-saiki-k -o ~/Media
 jack ~/Movies/Inbox -d                             # download metadata + poster only (<file>.meta.json, <file>.poster.jpg)
 jack Cosmos.mkv --tv                               # force TV (or --movie / --type auto|tv|movie; config/sidecar: type = "tv")
+jack ~/Movies --no-print --no-recursive             # every on/off flag has a --no-X form (last wins); --set saves false too
 jack movie.mp4 -p                                   # print merged metadata (ids, ratings, art URL); changes/writes nothing
 jack movie.mp4 -p --print-format json > m.json     # JSON array on stdout (report/warnings on stderr); -d -p = save files and print
 jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then sort

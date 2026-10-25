@@ -74,11 +74,26 @@ struct Cli {
     #[arg(long)]
     movie: bool,
     /// Fetch metadata/artwork only (saved beside the file); don't modify media
-    #[arg(short, long)]
+    #[arg(short, long, overrides_with = "no_download_only")]
     download_only: bool,
+    #[arg(long, overrides_with = "download_only")]
+    no_download_only: bool,
+    /// Descend into subdirectories (default)
+    #[arg(long, overrides_with = "no_recursive")]
+    recursive: bool,
+    #[arg(long, overrides_with = "recursive")]
+    no_recursive: bool,
+    /// Embed artwork into media (default)
+    #[arg(long, overrides_with = "no_embed_artwork")]
+    embed_artwork: bool,
+    #[arg(long, overrides_with = "embed_artwork")]
+    no_embed_artwork: bool,
     /// Print composite metadata to stdout; without -d, modify and write nothing
-    #[arg(short, long)]
+    #[arg(short, long, overrides_with = "no_print")]
     print: bool,
+    /// Don't print (undoes a saved print = true)
+    #[arg(long, overrides_with = "print")]
+    no_print: bool,
     /// --print format: text or json
     #[arg(long, value_parser = ["text", "json"])]
     print_format: Option<String>,
@@ -89,17 +104,25 @@ struct Cli {
     #[arg(short, long)]
     output: Option<PathBuf>,
     /// Show what would change; change nothing
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_dry_run")]
     dry_run: bool,
+    #[arg(long, overrides_with = "dry_run")]
+    no_dry_run: bool,
+}
+
+/// `--x` / `--no-x` (last wins) -> Some(true) / Some(false) / None.
+fn tri(on: bool, off: bool) -> Option<bool> {
+    if on { Some(true) } else if off { Some(false) } else { None }
 }
 
 impl From<&Cli> for Settings {
     fn from(c: &Cli) -> Self {
         Settings {
             output: c.output.clone(),
-            dry_run: c.dry_run.then_some(true),
-            download_only: c.download_only.then_some(true),
-            print: c.print.then_some(true),
+            dry_run: tri(c.dry_run, c.no_dry_run),
+            download_only: tri(c.download_only, c.no_download_only),
+            print: tri(c.print, c.no_print),
+            recursive: tri(c.recursive, c.no_recursive),
             print_format: c.print_format.clone(),
             from_file: c.from_file.clone(),
             imdb: c.imdb.clone(),
@@ -371,9 +394,10 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     if let Some(v) = &cli.print_format {
         ch.push(s("print_format", v));
     }
-    for (k, on) in [("dry_run", cli.dry_run), ("download_only", cli.download_only), ("print", cli.print)] {
-        if on {
-            ch.push(Change { key: k, value: Value::from(true), secret: false });
+    let f = Settings::from(cli);
+    for (k, v) in [("dry_run", f.dry_run), ("download_only", f.download_only), ("print", f.print), ("recursive", f.recursive), ("tagger.embed_artwork", tri(cli.embed_artwork, cli.no_embed_artwork))] {
+        if let Some(v) = v {
+            ch.push(Change { key: k, value: Value::from(v), secret: false });
         }
     }
     for (_, k, v) in secret_values(cli) {
@@ -420,9 +444,13 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
             _ => &mut p.omdb.api_key,
         } = v;
     }
+    if let Some(v) = tri(cli.embed_artwork, cli.no_embed_artwork) {
+        cfg.tagger.embed_artwork = v;
+    }
     let flags = Settings::from(cli);
-    let files = scan(&cli.paths, &cfg.base);
-    let dry = cli.dry_run || Settings::flag(cfg.base.dry_run);
+    let top = flags.clone().over(&cfg.base);
+    let files = scan(&cli.paths, &top);
+    let dry = Settings::flag(top.dry_run);
     let mut o = pre + &format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
     let (mut failed, mut pr) = (0, Printed::default());
     for p in files {
@@ -852,6 +880,36 @@ mod tests {
         run(&cli(&["--set", "--config", c.to_str().unwrap(), "--tv"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(fs::read_to_string(&c).unwrap().contains("type = \"tv\""));
         assert_eq!(config::load(Some(&c)).unwrap().base.kind.as_deref(), Some("tv"));
+    }
+
+    #[test]
+    fn no_flags_last_wins_and_set_saves_false() {
+        let f = Settings::from(&cli(&["--print", "--no-print", "--no-dry-run", "--dry-run", "x"]));
+        assert_eq!((f.print, f.dry_run, f.download_only), (Some(false), Some(true), None));
+        let d = tempfile::tempdir().unwrap();
+        let c = d.path().join("c.toml");
+        let cs = c.to_str().unwrap();
+        let none = || providers::fake::FakeHttp::new(vec![]);
+        run(&cli(&["--set", "--config", cs, "-p", "--no-embed-artwork"]), &none()).unwrap();
+        let (o, _, _) = run(&cli(&["--set", "--config", cs, "--no-print", "--no-recursive", "--no-dry-run"]), &none()).unwrap();
+        assert!(o.contains("print: true -> false"), "{o}");
+        let t = fs::read_to_string(&c).unwrap();
+        assert!(t.contains("print = false") && t.contains("recursive = false") && t.contains("embed_artwork = false") && t.contains("dry_run = false"), "{t}");
+        // saved print = true is undone per run by --no-print; --recursive beats saved false
+        run(&cli(&["--set", "--config", cs, "-p"]), &none()).unwrap();
+        let sub = d.path().join("a/b");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("m.mkv"), "x").unwrap();
+        fs::write(d.path().join("src.json"), r#"{"kind":"movie","title":"T"}"#).unwrap();
+        let src = d.path().join("src.json");
+        let dir = d.path().join("a");
+        let args = |extra: &[&str]| { let mut v = vec![dir.to_str().unwrap(), "--config", cs, "--dry-run", "-f", src.to_str().unwrap()]; v.extend(extra); cli(&v) };
+        let (o, p, _) = run(&args(&[]), &none()).unwrap();
+        assert!(o.contains("0 media file(s)") && p.is_empty(), "{o}");
+        let (o, p, _) = run(&args(&["--recursive", "--no-print"]), &none()).unwrap();
+        assert!(o.contains("1 media file(s)") && o.contains("tag: ") && p.is_empty(), "{o}");
+        let (_, p, _) = run(&args(&["--recursive"]), &none()).unwrap();
+        assert!(p.contains("title: T"));
     }
 
     #[test]
