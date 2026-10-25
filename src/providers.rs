@@ -246,7 +246,8 @@ impl Provider for Tvdb<'_> {
                 self.get(&format!("/series/slug/{}", enc(slug)))?
             }
             _ if !q.title.is_empty() => {
-                let r = self.get(&format!("/search?type=series&query={}", enc(&q.title)))?;
+                let yr = q.year.as_ref().map(|y| format!("&year={}", enc(y))).unwrap_or_default();
+                let r = self.get(&format!("/search?type=series&query={}{yr}", enc(&q.title)))?;
                 let Some(id) = s(&r[0]["tvdb_id"]) else { return Ok(None) };
                 self.get(&format!("/series/{id}"))?
             }
@@ -339,6 +340,20 @@ mod tests {
         let m = tmdb(&h).lookup(&q).unwrap().unwrap();
         assert_eq!((m["show"].as_str(), m["episode_title"].as_str(), m["season"].as_str()), ("Saiki K", "Ep Two", "1"));
         assert!(h.calls.borrow().iter().any(|c| c.contains("query=Saiki%20K")));
+    }
+
+    #[test]
+    fn year_filters_in_search_queries() {
+        let h = FakeHttp::new(vec![("/search/movie", json!({"results":[{"id":1}]})), ("/movie/1", json!({"title":"Dune"}))]);
+        tmdb(&h).lookup(&Query { title: "Dune".into(), year: Some("1984".into()), ..Default::default() }).unwrap();
+        assert!(h.calls.borrow().iter().any(|c| c.contains("/search/movie?") && c.contains("query=Dune&year=1984")), "{:?}", h.calls.borrow());
+        let h = FakeHttp::new(vec![("/search/tv", json!({"results":[{"id":2}]})), ("/tv/2", json!({"name":"Cosmos"}))]);
+        let q = Query { title: "Cosmos".into(), year: Some("1980".into()), season: Some(1), ..Default::default() };
+        tmdb(&h).lookup(&q).unwrap();
+        assert!(h.calls.borrow().iter().any(|c| c.contains("first_air_date_year=1980")));
+        let h = FakeHttp::new(vec![("/login", json!({"data":{"token":"T"}})), ("/search", json!({"data":[{"tvdb_id":"9"}]})), ("/series/9", json!({"data":{"id":9,"name":"Cosmos"}}))]);
+        Tvdb::new(TvdbCfg { api_key: "k".into(), base_url: "http://v".into(), ..Default::default() }, &h).lookup(&q).unwrap();
+        assert!(h.calls.borrow().iter().any(|c| c.contains("type=series&query=Cosmos&year=1980")), "{:?}", h.calls.borrow());
     }
 
     #[test]

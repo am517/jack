@@ -28,6 +28,7 @@ mkdir -p ~/.config/windups/jack && cp config/jack.toml ~/.config/windups/jack/co
 ```zsh
 jack ~/Movies/Inbox --dry-run -o ~/Media          # preview tags + renames; changes nothing
 jack ~/Movies/the.matrix.1999.mp4 --imdb tt0133093 # tag in place
+jack "Dune (1984).mkv" --name "Dune" --year 1984  # override the filename guess
 jack ~/TV/saiki-k/ --thetvdb https://www.thetvdb.com/series/the-disastrous-life-of-saiki-k -o ~/Media
 jack ~/Movies/Inbox -d                             # download metadata + poster only (<file>.meta.json, <file>.poster.jpg)
 jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then sort

@@ -32,6 +32,12 @@ struct Cli {
     tmdb: Option<String>,
     #[arg(long)]
     youtube: Option<String>,
+    /// Title to search for (overrides the filename guess)
+    #[arg(long)]
+    name: Option<String>,
+    /// Release / first-air year (search filter)
+    #[arg(long)]
+    year: Option<String>,
     /// Fetch metadata/artwork only (saved beside the file); don't modify media
     #[arg(short, long)]
     download_only: bool,
@@ -57,6 +63,8 @@ impl From<&Cli> for Settings {
             thetvdb: c.thetvdb.clone(),
             tmdb: c.tmdb.clone(),
             youtube: c.youtube.clone(),
+            name: c.name.clone(),
+            year: c.year.clone(),
             ..Default::default()
         }
     }
@@ -87,6 +95,12 @@ fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
     q.imdb = s.imdb.clone();
     q.tmdb = s.tmdb.clone();
     q.thetvdb = s.thetvdb.clone();
+    if let Some(n) = s.name.as_ref().filter(|n| !n.is_empty()) {
+        q.title = n.clone();
+    }
+    if let Some(y) = s.year.as_ref().filter(|y| !y.is_empty()) {
+        q.year = Some(y.clone());
+    }
     Ok(q)
 }
 
@@ -166,7 +180,7 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
 }
 
 fn ids(s: &Settings) -> String {
-    let v: Vec<String> = [("imdb", &s.imdb), ("tmdb", &s.tmdb), ("thetvdb", &s.thetvdb), ("youtube", &s.youtube)]
+    let v: Vec<String> = [("imdb", &s.imdb), ("tmdb", &s.tmdb), ("thetvdb", &s.thetvdb), ("youtube", &s.youtube), ("name", &s.name), ("year", &s.year)]
         .iter()
         .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={v}")))
         .collect();
@@ -239,6 +253,21 @@ mod tests {
         assert_eq!(s.output, Some(PathBuf::from("/main")));
         assert_eq!(s.recursive, Some(true));
         assert!(s.extensions.unwrap().contains(&"mkv".to_string()));
+    }
+
+    #[test]
+    fn name_and_year_override_filename_guess() {
+        let d = tempfile::tempdir().unwrap();
+        let m = d.path().join("Dune.2021.mkv");
+        fs::write(&m, "").unwrap();
+        fs::write(d.path().join("Dune.2021.mkv.config"), "name = \"Dune Part One\"\nyear = \"1999\"\n").unwrap();
+        let cfg = config::load(Some(Path::new("config/jack.toml"))).unwrap();
+        let c = cli(&[m.to_str().unwrap(), "--year", "2021"]);
+        let (s, _) = config::resolve(&Settings::from(&c), &cfg.base, &m).unwrap();
+        let q = query(&m, &s, &cfg).unwrap();
+        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune Part One", Some("2021"))); // sidecar name, flag year
+        let q = query(&m, &Settings::default(), &cfg).unwrap();
+        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune", Some("2021")));
     }
 
     #[test]

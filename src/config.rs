@@ -38,6 +38,10 @@ pub struct Settings {
     pub thetvdb: Option<String>,
     pub tmdb: Option<String>,
     pub youtube: Option<String>,
+    /// Title override (narrows the filename guess; used as the search query).
+    pub name: Option<String>,
+    /// Year override (search filter).
+    pub year: Option<String>,
 }
 
 impl Settings {
@@ -58,6 +62,8 @@ impl Settings {
             thetvdb: self.thetvdb.or(l.thetvdb),
             tmdb: self.tmdb.or(l.tmdb),
             youtube: self.youtube.or(l.youtube),
+            name: self.name.or(l.name),
+            year: self.year.or(l.year),
         }
     }
     pub fn flag(v: Option<bool>) -> bool {

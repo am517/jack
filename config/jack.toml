@@ -24,6 +24,11 @@ download_only = false
 # --from-file <path> reads it back; give a directory to use "<dir>/<filename><meta_suffix>".
 meta_suffix = ".meta.json"
 
+# Search overrides (usually set per file in a sidecar, or with --name / --year).
+# name replaces the title guessed from the filename; year filters searches.
+# name = "Blade Runner"
+# year = "1982"
+
 [tagger]
 # MP4/M4V/MOV writer: "atomicparsley" (iTunes-style atoms, like iVI4) or "exiftool".
 mp4_tool = "atomicparsley"
