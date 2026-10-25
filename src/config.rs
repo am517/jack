@@ -55,6 +55,8 @@ pub struct Settings {
     /// "tv", "movie" or "auto": forces the matcher and providers.
     #[serde(rename = "type")]
     pub kind: Option<String>,
+    /// iTunes Grouping (MP4 ©grp / MKV GROUPING).
+    pub grouping: Option<String>,
 }
 
 impl Settings {
@@ -81,6 +83,7 @@ impl Settings {
             year: self.year.or(l.year),
             art_style: self.art_style.or(l.art_style),
             kind: self.kind.or(l.kind),
+            grouping: self.grouping.or(l.grouping),
         }
     }
     pub fn flag(v: Option<bool>) -> bool {

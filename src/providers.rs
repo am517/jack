@@ -128,6 +128,9 @@ pub struct ProvidersCfg {
     pub tv_show_year: bool,
     /// Append "Original title: ..." to the description.
     pub original_in_description: bool,
+    /// Genres from all providers: "lower", "title" or "asis"; joined with genre_separator.
+    pub genre_case: String,
+    pub genre_separator: String,
     pub tmdb: TmdbCfg,
     pub thetvdb: TvdbCfg,
     pub omdb: OmdbCfg,
@@ -137,6 +140,29 @@ impl std::fmt::Debug for ProvidersCfg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProvidersCfg").field("order", &self.order).finish_non_exhaustive()
     }
+}
+
+/// "a, b" from `[{"name": "a"}, {"name": "b"}]`.
+fn join_names(v: &Value) -> Option<String> {
+    let n: Vec<String> = v.as_array()?.iter().filter_map(|g| s(&g["name"])).collect();
+    (!n.is_empty()).then(|| n.join(", "))
+}
+
+/// All genres (comma lists) merged: deduped case-insensitively, cased, sorted, joined.
+pub fn merge_genres<'a>(lists: impl Iterator<Item = &'a str>, case: &str, sep: &str) -> Option<String> {
+    let mut out: Vec<String> = vec![];
+    for g in lists.flat_map(|l| l.split(',')).map(str::trim).filter(|g| !g.is_empty() && *g != "N/A") {
+        let g = match case {
+            "lower" => g.to_lowercase(),
+            "title" => g.split(' ').map(|w| { let mut c = w.chars(); c.next().map_or(String::new(), |f| f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect()) }).collect::<Vec<_>>().join(" "),
+            _ => g.to_string(),
+        };
+        if !out.iter().any(|o| o.to_lowercase() == g.to_lowercase()) {
+            out.push(g);
+        }
+    }
+    out.sort_by_key(|g| g.to_lowercase());
+    (!out.is_empty()).then(|| out.join(sep))
 }
 
 pub fn enc(s: &str) -> String {
@@ -292,7 +318,7 @@ impl Provider for Tmdb<'_> {
         let date = s(&d[if tv { "first_air_date" } else { "release_date" }]);
         put(&mut m, "year", date.as_ref().map(|x| x.chars().take(4).collect()));
         put(&mut m, "description", s(&d["overview"]));
-        put(&mut m, "genre", s(&d["genres"][0]["name"]));
+        put(&mut m, "genre", join_names(&d["genres"]));
         put(&mut m, "poster_url", self.img(&d["poster_path"]));
         put(&mut m, "tmdb_id", Some(id.clone()));
         let bd = d["images"]["backdrops"].as_array().cloned().unwrap_or_default();
@@ -326,7 +352,15 @@ impl Provider for Tmdb<'_> {
                     m.insert(WARNING.into(), format!("no S{se:02}E{ep:02} in TMDB (tried episode groups and absolute numbering); series data only"));
                     return Ok(Some(m));
                 };
-                put(&mut m, "episode_title", s(&e["name"]));
+                let name = s(&e["name"]);
+                // original-language episode name: same episode in the show's original language
+                let ol = s(&d["original_language"]).filter(|l| self.cfg.keep_original && !self.cfg.language.starts_with(l.as_str()));
+                if let (Some(ol), Some(sn), Some(en)) = (ol, s(&e["season_number"]), s(&e["episode_number"])) {
+                    let t = Tmdb { cfg: TmdbCfg { language: ol, ..self.cfg.clone() }, http: self.http };
+                    let o = t.get(&format!("/tv/{id}/season/{sn}/episode/{en}"), &[]).ok().and_then(|o| s(&o["name"]));
+                    put_original(&mut m, true, "original_episode_title", o, name.as_ref());
+                }
+                put(&mut m, "episode_title", name);
                 put(&mut m, "description", s(&e["overview"]));
                 put(&mut m, "date", s(&e["air_date"]));
                 put(&mut m, "tmdb_episode_id", s(&e["id"]));
@@ -372,10 +406,13 @@ impl<'a> Tvdb<'a> {
 impl Tvdb<'_> {
     /// `/<kind>/<id>/translations/<language>` (Null if none).
     fn translation(&self, kind: &str, id: &str) -> Value {
-        if self.cfg.language.is_empty() {
+        self.translation_in(kind, id, &self.cfg.language)
+    }
+    fn translation_in(&self, kind: &str, id: &str, lang: &str) -> Value {
+        if lang.is_empty() {
             return Value::Null;
         }
-        self.get(&format!("/{kind}/{id}/translations/{}", self.cfg.language)).unwrap_or(Value::Null)
+        self.get(&format!("/{kind}/{id}/translations/{lang}")).unwrap_or(Value::Null)
     }
     /// Best search hit: exact title (any name/translation/alias), the query year, not a future entry, then relevance.
     fn best(&self, r: &Value, q: &Query) -> Option<String> {
@@ -484,6 +521,7 @@ impl Provider for Tvdb<'_> {
             let bg: Vec<_> = art.iter().filter(|a| a["type"].as_u64() == Some(3)).collect();
             let pick = bg.iter().find(|a| a["language"].as_str() == Some(self.cfg.image_language.as_str())).or_else(|| bg.iter().find(|a| a["language"].is_null())).or(bg.first());
             put(&mut m, "backdrop_url", img(pick.and_then(|a| s(&a["image"]))));
+            put(&mut m, "genre", join_names(&x["genres"]));
         }
         put(&mut m, "thetvdb_id", Some(id.clone()));
         put(&mut m, "thetvdb_series_id", Some(id.clone()));
@@ -497,8 +535,14 @@ impl Provider for Tvdb<'_> {
                 return Ok(Some(m));
             }
             let tr = s(&e["id"]).map_or(Value::Null, |eid| self.translation("episodes", &eid));
-            let orig = s(&e["name"]);
-            let name = s(&tr["name"]).or(orig.clone());
+            // the episode list may already be translated; ask for the original language explicitly
+            let ol = s(&series["originalLanguage"]).filter(|l| self.cfg.keep_original && *l != self.cfg.language);
+            let otr = match (ol, s(&e["id"])) {
+                (Some(l), Some(eid)) => self.translation_in("episodes", &eid, &l),
+                _ => Value::Null,
+            };
+            let orig = s(&otr["name"]).or(s(&e["name"]));
+            let name = s(&tr["name"]).or(s(&e["name"]));
             put_original(&mut m, self.cfg.keep_original, "original_episode_title", orig, name.as_ref());
             put(&mut m, "episode_title", name);
             put(&mut m, "description", s(&tr["overview"]).or(s(&e["overview"])));
@@ -545,6 +589,7 @@ impl Provider for Omdb<'_> {
         put(&mut m, "year", g("Year").map(|y| y.chars().take(4).collect()));
         put(&mut m, "imdb_id", g("imdbID"));
         put(&mut m, "rated", g("Rated"));
+        put(&mut m, "genre", g("Genre"));
         put(&mut m, "awards", g("Awards"));
         put(&mut m, "description", g("Plot"));
         put(&mut m, "poster_url", g("Poster"));
@@ -626,6 +671,14 @@ mod tests {
         ]);
         let m = tmdb(&h).lookup(&q).unwrap().unwrap();
         assert_eq!((m["episode_title"].as_str(), m.contains_key(WARNING)), ("Absolute", false));
+    }
+
+    #[test]
+    fn genres_merged() {
+        let l = ["Animation, Comedy", "comedy, Family", "N/A", "Sci-Fi & Fantasy"];
+        assert_eq!(merge_genres(l.iter().copied(), "lower", ",").unwrap(), "animation,comedy,family,sci-fi & fantasy");
+        assert_eq!(merge_genres(["action ADVENTURE"].into_iter(), "title", ", ").unwrap(), "Action Adventure");
+        assert!(merge_genres([""].into_iter(), "lower", ",").is_none());
     }
 
     #[test]

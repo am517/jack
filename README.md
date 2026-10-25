@@ -67,6 +67,11 @@ with a warning.
 - `tv_show_year = true` adds `(YYYY)` to show names; `[matching] episode_title_from_filename` uses the filename's episode title when providers have none.
 - `image_base` should be the bare TMDB image root (`https://image.tmdb.org/t/p`); a trailing `/original` or `/wNNN` is stripped with a warning.
 
+### Genres and grouping
+
+- Genres from every provider are merged, deduped, alphabetized and written as one string (`genre_case = "lower"`, `genre_separator = ","` under `[providers]`), e.g. `animation,comedy,family`.
+- `--grouping <text>` (or `grouping = "..."` in a sidecar/config) writes iTunes Grouping (MP4 ©grp, MKV GROUPING).
+
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:

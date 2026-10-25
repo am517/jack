@@ -64,6 +64,9 @@ struct Cli {
     /// Art orientation: poster or landscape
     #[arg(long, value_parser = ["poster", "landscape"])]
     art: Option<String>,
+    /// iTunes Grouping (MP4 ©grp, MKV GROUPING); usually set in a sidecar
+    #[arg(long)]
+    grouping: Option<String>,
     /// File-name language: original or a language code (see [naming])
     #[arg(long)]
     file_language: Option<String>,
@@ -138,6 +141,7 @@ impl From<&Cli> for Settings {
             name: c.name.clone(),
             year: c.year.clone(),
             art_style: c.art.clone(),
+            grouping: c.grouping.clone(),
             kind: c.tv.then(|| "tv".into()).or(c.movie.then(|| "movie".into())).or(c.kind.clone()),
             ..Default::default()
         }
@@ -225,6 +229,10 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
         let _ = writeln!(out, "    warning: {e}");
     }
     let mut m = sorter::merge(&found, &cfg.merge);
+    match providers::merge_genres(found.iter().filter_map(|(_, x)| x.get("genre").map(String::as_str)), &pc.genre_case, &pc.genre_separator) {
+        Some(g) => m.insert("genre".into(), g),
+        None => m.remove("genre"),
+    };
     let ep = m.get("kind").is_some_and(|k| k == "episode");
     if ep && !m.contains_key("episode_title") && cfg.matching.episode_title_from_filename {
         if let Some(t) = &q.episode_title {
@@ -299,7 +307,7 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
     let dry = Settings::flag(s.dry_run);
     let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
-    let meta = match &s.from_file {
+    let mut meta = match &s.from_file {
         Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
         Some(f) => meta::load(f)?,
         None => {
@@ -313,6 +321,9 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
             m
         }
     };
+    if let Some(g) = &s.grouping {
+        meta.insert("grouping".into(), g.clone());
+    }
     let _ = writeln!(out, "    ids: {}", found_ids(&meta, s));
     if s.youtube.is_some() {
         let _ = writeln!(out, "    note: --youtube is not supported yet (later phase)");
@@ -331,7 +342,6 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
         let _ = writeln!(out, "    save metadata: {}", mp.display());
         return Ok(());
     }
-    let mut meta = meta;
     if let Some(i) = s.imdb.as_deref().and_then(providers::imdb_id) {
         meta.entry("imdb_id".into()).or_insert(i);
     }
@@ -445,6 +455,10 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
         if let Some(v) = v {
             ch.push(s(k, v));
         }
+    }
+    if let Some(v) = &cli.grouping {
+        let _ = writeln!(o, "warning: --grouping is usually per-file (sidecar); saved as the default for all files");
+        ch.push(s("grouping", v));
     }
     if let Some(v) = &cli.print_format {
         ch.push(s("print_format", v));
@@ -992,16 +1006,17 @@ mod tests {
         let h = providers::fake::FakeHttp::new(vec![
             ("http://t/search/tv", json!({"results":[{"id":220542}]})),
             ("http://t/tv/220542/episode_groups", json!({"results":[]})),
-            ("http://t/tv/220542?", json!({"name":"The Apothecary Diaries","original_name":"薬屋のひとりごと","first_air_date":"2023-10-22","poster_path":"/p.jpg","seasons":[{"season_number":1,"episode_count":24},{"season_number":2,"episode_count":24},{"season_number":3,"episode_count":12}]})),
+            ("http://t/tv/220542?", json!({"name":"The Apothecary Diaries","original_name":"薬屋のひとりごと","first_air_date":"2023-10-22","poster_path":"/p.jpg","genres":[{"name":"Animation"},{"name":"Drama"}],"seasons":[{"season_number":1,"episode_count":24},{"season_number":2,"episode_count":24},{"season_number":3,"episode_count":12}]})),
             ("/login", json!({"data":{"token":"T"}})),
             ("http://v/search", json!({"data":[{"tvdb_id":"482073","name":"薬屋のひとりごと (2027)","year":"2027"},{"tvdb_id":"433631","name":"薬屋のひとりごと","year":"2023","translations":{"eng":"The Apothecary Diaries"}}]})),
             ("/series/433631/translations/eng", json!({"data":{"name":"The Apothecary Diaries","overview":"Maomao..."}})),
-            ("/series/433631/episodes", json!({"data":{"episodes":[{"id":777,"name":"蝗害","seasonNumber":3,"number":1}]}})),
+            ("/series/433631/episodes", json!({"data":{"episodes":[{"id":777,"name":"Locusts","seasonNumber":3,"number":1}]}})),
             ("/episodes/777/translations/eng", json!({"data":{"name":"Locusts"}})),
-            ("/series/433631/extended", json!({"data":{}})),
-            ("/series/433631", json!({"data":{"id":433631,"name":"薬屋のひとりごと","firstAired":"2023-10-22","year":"2027"}})),
+            ("/episodes/777/translations/jpn", json!({"data":{"name":"蝗害"}})),
+            ("/series/433631/extended", json!({"data":{"genres":[{"name":"animation"},{"name":"Mystery"}]}})),
+            ("/series/433631", json!({"data":{"id":433631,"name":"薬屋のひとりごと","firstAired":"2023-10-22","year":"2027","originalLanguage":"jpn"}})),
         ]);
-        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-p", "-o", "/out"]);
+        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-p", "-o", "/out", "--grouping", "Anime"]);
         let (out, p, failed) = run(&c, &h).unwrap();
         assert_eq!(failed, 0, "{out}");
         let meta = meta::load(&d.path().join("The Apothecary Diaries - S03E01 - Locusts.mp4.meta.json")).unwrap();
@@ -1009,11 +1024,13 @@ mod tests {
         assert_eq!(meta["original_show"], "薬屋のひとりごと");
         assert_eq!(meta["year"], "2023", "firstAired, not the 2027 duplicate");
         assert_eq!(meta["episode_title"], "Locusts");
-        assert_eq!(meta["original_episode_title"], "蝗害");
+        assert_eq!(meta["original_episode_title"], "蝗害", "list name was English; original via translations/jpn");
+        assert_eq!(meta["genre"], "animation,drama,mystery");
+        assert_eq!(meta["grouping"], "Anime");
         assert!(out.contains("warning: tmdb: no S03E01"), "{out}");
         assert!(out.contains("tmdb=220542") && out.contains("433631"), "{out}");
         assert_eq!(out.matches("image_base").count(), 1, "{out}");
-        assert!(out.contains("warning: artwork:"), "art failure is a warning: {out}");
+        assert!(out.contains("warning: artwork:"), "art failure is a warning: {out}"); // and meta.json was still saved (loaded above)
         assert!(p.contains("original_show: 薬屋のひとりごと"), "{p}");
         let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out"]), &h).unwrap();
         assert!(out.contains("/out/TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗害.mp4"), "{out}");

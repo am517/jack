@@ -42,7 +42,12 @@ fn xml(s: &str) -> String {
 /// updated or inserted in the global tag. All other tags and targets are kept as-is.
 /// None if `m` has no ids.
 pub fn mkv_tags_xml(m: &Meta, cfg: &TaggerCfg, existing: &str) -> Option<String> {
-    let v = ids(m, &cfg.mkv_id_tags);
+    let mut v = ids(m, &cfg.mkv_id_tags);
+    for (n, k) in [("GENRE", "genre"), ("GROUPING", "grouping")] {
+        if let Some(x) = m.get(k).filter(|x| !x.is_empty()) {
+            v.push((n, x.as_str()));
+        }
+    }
     if v.is_empty() {
         return None;
     }
@@ -131,7 +136,12 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
                 let short = desc.map(|d| d.chars().take(cfg.short_description_max).collect::<String>());
                 kv(&mut a, "--description", short.as_ref());
                 kv(&mut a, "--longdesc", desc);
+                if m.contains_key("genre") {
+                    // keep the text genre in ©gen: drop any numeric gnre atom first
+                    a.extend(["--manualAtomRemove".into(), "moov.udta.meta.ilst.gnre".into()]);
+                }
                 kv(&mut a, "--genre", m.get("genre"));
+                kv(&mut a, "--grouping", m.get("grouping"));
                 if ep {
                     kv(&mut a, "--TVShowName", m.get("show"));
                     kv(&mut a, "--artist", m.get("show"));
@@ -153,6 +163,7 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
                 eq(&mut a, "Description", desc);
                 eq(&mut a, "LongDescription", desc);
                 eq(&mut a, "Genre", m.get("genre"));
+                eq(&mut a, "Grouping", m.get("grouping"));
                 if ep {
                     eq(&mut a, "TVShow", m.get("show"));
                     eq(&mut a, "TVSeason", m.get("season"));
@@ -285,7 +296,7 @@ mod tests {
         let c = command(Path::new("a.mp4"), &episode(), &t).unwrap();
         assert!(c.contains(&"-TVShow=Saiki K".to_string()) && c.last().unwrap() == "a.mp4");
         let c = command(Path::new("b.mkv"), &movie(), &t).unwrap();
-        assert_eq!(c, ["mkvpropedit", "b.mkv", "--edit", "info", "--set", "title=The Matrix"]);
+        assert_eq!(&c[..6], ["mkvpropedit", "b.mkv", "--edit", "info", "--set", "title=The Matrix"]);
         assert!(command(Path::new("c.avi"), &movie(), &t).is_err());
         t.mp4_tool = "nope".into();
         assert!(command(Path::new("a.mp4"), &movie(), &t).is_err());
@@ -337,13 +348,37 @@ mod tests {
     }
 
     #[test]
+    fn genre_grouping_and_original_tags() {
+        let mut m = movie();
+        for (k, v) in [("genre", "animation,comedy"), ("grouping", "Ghibli"), ("original_title", "千と千尋"), ("original_show", "S"), ("original_episode_title", "蝗")] {
+            m.insert(k.into(), v.into());
+        }
+        let c = show(&command(Path::new("a.mp4"), &m, &cfg()).unwrap());
+        assert!(c.contains("--manualAtomRemove moov.udta.meta.ilst.gnre --genre animation,comedy --grouping Ghibli"), "{c}");
+        for n in ["ORIGINAL_TITLE", "ORIGINAL_SHOW", "ORIGINAL_EPISODE_TITLE"] {
+            assert!(c.contains(&format!("name={n} domain=com.apple.iTunes")), "{n}: {c}");
+        }
+        let mut e = cfg();
+        e.mp4_tool = "exiftool".into();
+        let x = command(Path::new("a.mp4"), &m, &e).unwrap();
+        assert!(x.contains(&"-Grouping=Ghibli".into()) && x.contains(&"-Genre=animation,comedy".into()));
+        assert!(show(&extra_commands(Path::new("a.mp4"), &m, &e)[0]).contains("name=ORIGINAL_TITLE"));
+        let x = mkv_tags_xml(&m, &cfg(), "").unwrap();
+        for t in ["<Name>GENRE</Name><String>animation,comedy</String>", "<Name>GROUPING</Name><String>Ghibli</String>", "<Name>ORIGINAL_TITLE</Name><String>千と千尋</String>", "<Name>ORIGINAL_EPISODE_TITLE</Name><String>蝗</String>"] {
+            assert!(x.contains(t), "{t}: {x}");
+        }
+    }
+
+    #[test]
     fn id_args_and_xml() {
         let c = show(&command(Path::new("a.mp4"), &ids_meta(movie()), &cfg()).unwrap());
         assert!(c.contains("--rDNSatom tt0133093 name=IMDB_ID domain=com.apple.iTunes"), "{c}");
         assert!(c.contains("--rDNSatom 77 name=TMDB_EPISODE_ID"));
         let x = mkv_tags_xml(&ids_meta(movie()), &cfg(), "").unwrap();
         assert!(x.contains("<Name>IMDB</Name><String>tt0133093</String>") && x.contains("<Name>TVDB_SERIES</Name>"));
-        assert!(mkv_tags_xml(&movie(), &cfg(), "").is_none());
+        let mut bare = movie();
+        bare.remove("genre");
+        assert!(mkv_tags_xml(&bare, &cfg(), "").is_none());
         // merge: keeps track tags + other global tags, updates ours in place, idempotent
         let old = "<Tags><Tag><Targets><TrackUID>5</TrackUID></Targets><Simple><Name>IMDB</Name><String>trk</String></Simple></Tag>\
                    <Tag><Targets /><Simple><Name>ARTIST</Name><String>A &amp; B</String></Simple><Simple><Name>IMDB</Name><String>old</String></Simple></Tag></Tags>";

@@ -25,6 +25,8 @@ download_only = false
 print = false
 # "text" (key: value) or "json"
 print_format = "text"
+# iTunes Grouping (MP4 ©grp / MKV GROUPING); usually set per file in a sidecar, e.g. grouping = "Studio Ghibli".
+# grouping = ""
 
 # Where --download-only saves fetched metadata ("<filename><meta_suffix>").
 # --from-file <path> reads it back; give a directory to use "<dir>/<filename><meta_suffix>".
@@ -124,6 +126,9 @@ keep_original = true
 tv_show_year = false
 # Append "Original title: ..." to the description.
 original_in_description = false
+# Genres from every provider, deduped and alphabetized: case "lower", "title" or "asis".
+genre_case = "lower"
+genre_separator = ","
 language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", it = "ita", pt = "por", ko = "kor", zh = "zho", ru = "rus", nl = "nld", sv = "swe" }
 
 [providers.tmdb]
