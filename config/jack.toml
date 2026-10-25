@@ -61,7 +61,7 @@ tmdb_series_id = "TMDB_SERIES_ID"
 tmdb_episode_id = "TMDB_EPISODE_ID"
 thetvdb_series_id = "TVDB_SERIES_ID"
 thetvdb_episode_id = "TVDB_EPISODE_ID"
-# MKV: global simple tags (mkvpropedit --tags global:..., replaces existing global tags).
+# MKV: global simple tags, merged into the existing tags (others, incl. track tags, are kept).
 [tagger.mkv_id_tags]
 imdb_id = "IMDB"
 tmdb_id = "TMDB"

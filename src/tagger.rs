@@ -35,17 +35,43 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// Matroska tags XML (global target) for the ids in `m`, or None if there are none.
-pub fn mkv_tags_xml(m: &Meta, cfg: &TaggerCfg) -> Option<String> {
+/// Matroska tags XML: `existing` (from mkvextract, may be empty) with our id simple tags
+/// updated or inserted in the global tag. All other tags and targets are kept as-is.
+/// None if `m` has no ids.
+pub fn mkv_tags_xml(m: &Meta, cfg: &TaggerCfg, existing: &str) -> Option<String> {
     let v = ids(m, &cfg.mkv_id_tags);
     if v.is_empty() {
         return None;
     }
-    let mut x = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Tags><Tag><Targets/>");
+    let mut doc = if existing.contains("</Tags>") { existing.to_string() } else { "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Tags>\n</Tags>\n".into() };
+    // global tag = a <Tag> whose <Targets> names no UID (track/edition/chapter/attachment)
+    let tag_re = regex::Regex::new(r"(?s)<Tag>.*?</Tag>").unwrap();
+    let global = tag_re.find_iter(&doc).find(|t| {
+        let s = t.as_str();
+        let tg = s.find("<Targets").map_or("", |i| &s[i..s[i..].find("</Targets>").map_or_else(|| s[i..].find("/>").map_or(s.len(), |j| i + j), |j| i + j)]);
+        !tg.contains("UID>")
+    });
+    let (start, mut tag) = match global {
+        Some(t) => (Some(t.range()), t.as_str().to_string()),
+        None => (None, "<Tag><Targets/></Tag>".to_string()),
+    };
     for (n, s) in v {
-        x += &format!("<Simple><Name>{}</Name><String>{}</String></Simple>", xml(n), xml(s));
+        let re = regex::Regex::new(&format!(r"(?s)(<Simple>\s*<Name>{}</Name>\s*<String>)[^<]*(</String>)", regex::escape(&xml(n)))).unwrap();
+        if re.is_match(&tag) {
+            tag = re.replace(&tag, |c: &regex::Captures| format!("{}{}{}", &c[1], xml(s), &c[2])).into_owned();
+        } else {
+            let i = tag.rfind("</Tag>").unwrap();
+            tag.insert_str(i, &format!("<Simple><Name>{}</Name><String>{}</String></Simple>", xml(n), xml(s)));
+        }
     }
-    Some(x + "</Tag></Tags>\n")
+    match start {
+        Some(r) => doc.replace_range(r, &tag),
+        None => {
+            let i = doc.rfind("</Tags>").unwrap();
+            doc.insert_str(i, &tag);
+        }
+    }
+    Some(doc)
 }
 
 /// Extra commands to run after `command` (ids via AtomicParsley when exiftool is the MP4 writer,
@@ -69,7 +95,7 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
     let desc = m.get("description");
     let mut a = Vec::new();
     if has_ext(file, &cfg.mkv_extensions) {
-        a.extend([cfg.mkvpropedit.clone(), f]);
+        a.extend([cfg.mkvpropedit.clone(), f.clone()]);
         if let Some(t) = title {
             a.extend(["--edit".into(), "info".into(), "--set".into(), format!("title={t}")]);
         }
@@ -79,11 +105,12 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
             }
             a.push(p.clone());
         }
-        if let Some(x) = mkv_tags_xml(m, cfg) {
+        let existing = output(&[&cfg.mkvextract, &f, "tags", "-"]).unwrap_or_default();
+        if let Some(x) = mkv_tags_xml(m, cfg, &existing) {
             let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let tp = std::env::temp_dir().join(format!("jack-{}-{name}.tags.xml", std::process::id()));
             std::fs::write(&tp, x).map_err(|e| format!("{}: {e}", tp.display()))?;
-            a.extend(["--tags".into(), format!("global:{}", tp.display())]);
+            a.extend(["--tags".into(), format!("all:{}", tp.display())]);
         }
     } else if has_ext(file, &cfg.mp4_extensions) {
         match cfg.mp4_tool.to_ascii_lowercase().as_str() {
@@ -180,7 +207,7 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         .args(&argv[1..])
         .output()
         .map_err(|e| format!("{}: {e} (install it, e.g. `brew install atomicparsley exiftool mkvtoolnix`, or set its path under [tagger])", argv[0]))?;
-    for t in argv.iter().filter_map(|x| x.strip_prefix("global:")).filter(|x| x.ends_with(".tags.xml")) {
+    for t in argv.iter().filter_map(|x| x.strip_prefix("all:")).filter(|x| x.ends_with(".tags.xml")) {
         let _ = std::fs::remove_file(t); // temp tags file from `command`
     }
     if out.status.success() {
@@ -287,9 +314,16 @@ mod tests {
         let c = show(&command(Path::new("a.mp4"), &ids_meta(movie()), &cfg()).unwrap());
         assert!(c.contains("--rDNSatom tt0133093 name=IMDB_ID domain=com.apple.iTunes"), "{c}");
         assert!(c.contains("--rDNSatom 77 name=TMDB_EPISODE_ID"));
-        let x = mkv_tags_xml(&ids_meta(movie()), &cfg()).unwrap();
+        let x = mkv_tags_xml(&ids_meta(movie()), &cfg(), "").unwrap();
         assert!(x.contains("<Name>IMDB</Name><String>tt0133093</String>") && x.contains("<Name>TVDB_SERIES</Name>"));
-        assert!(mkv_tags_xml(&movie(), &cfg()).is_none());
+        assert!(mkv_tags_xml(&movie(), &cfg(), "").is_none());
+        // merge: keeps track tags + other global tags, updates ours in place, idempotent
+        let old = "<Tags><Tag><Targets><TrackUID>5</TrackUID></Targets><Simple><Name>IMDB</Name><String>trk</String></Simple></Tag>\
+                   <Tag><Targets /><Simple><Name>ARTIST</Name><String>A &amp; B</String></Simple><Simple><Name>IMDB</Name><String>old</String></Simple></Tag></Tags>";
+        let x = mkv_tags_xml(&ids_meta(movie()), &cfg(), old).unwrap();
+        assert!(x.contains("<TrackUID>5</TrackUID></Targets><Simple><Name>IMDB</Name><String>trk</String>"), "{x}");
+        assert!(x.contains("<Name>ARTIST</Name><String>A &amp; B</String>") && x.contains("<Name>IMDB</Name><String>tt0133093</String>") && !x.contains(">old<"));
+        assert_eq!(mkv_tags_xml(&ids_meta(movie()), &cfg(), &x).unwrap(), x);
         let mut t = cfg();
         t.mp4_tool = "exiftool".into();
         assert_eq!(extra_commands(Path::new("a.mp4"), &ids_meta(movie()), &t).len(), 1);
@@ -323,6 +357,27 @@ mod tests {
             assert_eq!(r.get("thetvdb_series_id").map(String::as_str), Some("7"));
             assert_eq!(r.len(), 4);
         }
+    }
+
+    /// Integration: pre-existing MKV global tags survive id writes; re-running is idempotent.
+    #[test]
+    fn integration_mkv_tags_merge() {
+        if !["mkvpropedit", "mkvextract"].iter().all(|x| have(x)) {
+            return eprintln!("skip mkv merge: tools missing");
+        }
+        let Some((d, p)) = make("mkv") else { return };
+        let t = cfg();
+        let pre = d.path().join("pre.xml");
+        std::fs::write(&pre, "<Tags><Tag><Targets/><Simple><Name>ARTIST</Name><String>Someone</String></Simple><Simple><Name>MY_CUSTOM</Name><String>keep me</String></Simple></Tag></Tags>").unwrap();
+        run(&[t.mkvpropedit.clone(), p.to_string_lossy().into(), "--tags".into(), format!("global:{}", pre.display())]).unwrap();
+        let tags = || output(&[&t.mkvextract, &p.to_string_lossy(), "tags", "-"]).unwrap();
+        let m = ids_meta(movie());
+        run(&command(&p, &m, &t).unwrap()).unwrap();
+        let once = tags();
+        assert!(once.contains("Someone") && once.contains("keep me") && once.contains("ENCODER"), "{once}");
+        assert_eq!(read_ids(&p, &t).len(), 4);
+        run(&command(&p, &m, &t).unwrap()).unwrap();
+        assert_eq!(tags(), once);
     }
 
     /// Integration: runs only when ffmpeg + the tag tool + exiftool (reader) are installed.
