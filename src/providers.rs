@@ -71,12 +71,18 @@ pub struct TmdbCfg {
     pub image_base: String,
     /// TMDB image size segment, e.g. "w780" or "original" (empty: none).
     pub poster_size: String,
+    pub backdrop_size: String,
+    pub still_size: String,
+    /// Preferred language for landscape art (ISO 639-1, e.g. "en"); null-language art is the fallback.
+    pub image_language: String,
     pub language: String,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]
 #[serde(default)]
 pub struct TvdbCfg {
+    /// Preferred language for background art (ISO 639-2, e.g. "eng"); untagged is the fallback.
+    pub image_language: String,
     /// "full" or "thumbnail" (TheTVDB's "_t" variant).
     pub poster_size: String,
     pub api_key: String,
@@ -148,7 +154,10 @@ impl Tmdb<'_> {
         self.http.get(&url, &h)
     }
     fn img(&self, v: &Value) -> Option<String> {
-        let sz = if self.cfg.poster_size.is_empty() { String::new() } else { format!("/{}", self.cfg.poster_size) };
+        self.img_sz(v, &self.cfg.poster_size)
+    }
+    fn img_sz(&self, v: &Value, size: &str) -> Option<String> {
+        let sz = if size.is_empty() { String::new() } else { format!("/{size}") };
         s(v).map(|p| format!("{}{sz}{p}", self.cfg.image_base.trim_end_matches('/')))
     }
 }
@@ -179,7 +188,7 @@ impl Provider for Tmdb<'_> {
             id = r["results"][0]["id"].as_u64().map(|x| x.to_string());
         }
         let Some(id) = id else { return Ok(None) };
-        let d = self.get(&format!("/{}/{id}", if tv { "tv" } else { "movie" }), &[("append_to_response", "external_ids".into())])?;
+        let d = self.get(&format!("/{}/{id}", if tv { "tv" } else { "movie" }), &[("append_to_response", "external_ids,images".into()), ("include_image_language", format!("{},null", self.cfg.image_language))])?;
         let mut m = Meta::new();
         let date = s(&d[if tv { "first_air_date" } else { "release_date" }]);
         put(&mut m, "year", date.as_ref().map(|x| x.chars().take(4).collect()));
@@ -187,6 +196,14 @@ impl Provider for Tmdb<'_> {
         put(&mut m, "genre", s(&d["genres"][0]["name"]));
         put(&mut m, "poster_url", self.img(&d["poster_path"]));
         put(&mut m, "tmdb_id", Some(id.clone()));
+        let bd = d["images"]["backdrops"].as_array().cloned().unwrap_or_default();
+        let pick = bd
+            .iter()
+            .find(|b| b["iso_639_1"].as_str() == Some(self.cfg.image_language.as_str()))
+            .or_else(|| bd.iter().find(|b| b["iso_639_1"].is_null()))
+            .map(|b| b["file_path"].clone())
+            .unwrap_or_else(|| d["backdrop_path"].clone());
+        put(&mut m, "backdrop_url", self.img_sz(&pick, &self.cfg.backdrop_size));
         put(&mut m, "imdb_id", s(&d["imdb_id"]).or_else(|| s(&d["external_ids"]["imdb_id"])));
         if tv {
             put(&mut m, "tmdb_series_id", Some(id.clone()));
@@ -207,6 +224,7 @@ impl Provider for Tmdb<'_> {
                 put(&mut m, "description", s(&e["overview"]));
                 put(&mut m, "date", s(&e["air_date"]));
                 put(&mut m, "tmdb_episode_id", s(&e["id"]));
+                put(&mut m, "still_url", self.img_sz(&e["still_path"], &self.cfg.still_size));
             }
         } else {
             m.insert("kind".into(), "movie".into());
@@ -282,12 +300,17 @@ impl Provider for Tvdb<'_> {
             _ => u,
         };
         put(&mut m, "poster_url", img(s(&series["image"])));
-        if let Some(se) = q.season {
-            if let Ok(x) = self.get(&format!("/series/{}/extended?short=true", s(&series["id"]).unwrap_or_default())) {
+        // extended record: season posters + background (fanart) artwork; optional
+        if let Ok(x) = self.get(&format!("/series/{}/extended", s(&series["id"]).unwrap_or_default())) {
+            if let Some(se) = q.season {
                 let ss = x["seasons"].as_array().cloned().unwrap_or_default();
                 let hit = ss.iter().find(|v| v["number"].as_u64() == Some(se as u64) && v["type"]["type"].as_str().is_none_or(|t| t == "official"));
                 put(&mut m, "season_poster_url", img(hit.and_then(|v| s(&v["image"]))));
             }
+            let art = x["artworks"].as_array().cloned().unwrap_or_default();
+            let bg: Vec<_> = art.iter().filter(|a| a["type"].as_u64() == Some(3)).collect();
+            let pick = bg.iter().find(|a| a["language"].as_str() == Some(self.cfg.image_language.as_str())).or_else(|| bg.iter().find(|a| a["language"].is_null())).or(bg.first());
+            put(&mut m, "backdrop_url", img(pick.and_then(|a| s(&a["image"]))));
         }
         put(&mut m, "thetvdb_id", Some(id.clone()));
         put(&mut m, "thetvdb_series_id", Some(id.clone()));
@@ -300,6 +323,7 @@ impl Provider for Tvdb<'_> {
             put(&mut m, "description", s(&e["overview"]));
             put(&mut m, "date", s(&e["aired"]));
             put(&mut m, "thetvdb_episode_id", s(&e["id"]));
+            put(&mut m, "still_url", s(&e["image"]));
         }
         Ok(Some(m))
     }
@@ -383,6 +407,40 @@ mod tests {
     }
 
     #[test]
+    fn landscape_art_urls() {
+        let h = FakeHttp::new(vec![
+            ("/search/movie", json!({"results":[{"id":1}]})),
+            ("/movie/1", json!({"title":"Dune","backdrop_path":"/def.jpg","images":{"backdrops":[{"iso_639_1":null,"file_path":"/null.jpg"},{"iso_639_1":"fr","file_path":"/fr.jpg"},{"iso_639_1":"en","file_path":"/en.jpg"}]}})),
+        ]);
+        let mut t = tmdb(&h);
+        (t.cfg.image_language, t.cfg.backdrop_size, t.cfg.still_size) = ("en".into(), "w1280".into(), "w300".into());
+        let m = t.lookup(&Query { title: "Dune".into(), ..Default::default() }).unwrap().unwrap();
+        assert_eq!(m["backdrop_url"], "http://img/w1280/en.jpg");
+        assert!(h.calls.borrow().iter().any(|c| c.contains("include_image_language=en%2Cnull") || c.contains("include_image_language=en,null")), "{:?}", h.calls.borrow());
+        t.cfg.image_language = "de".into();
+        assert_eq!(t.lookup(&Query { title: "Dune".into(), ..Default::default() }).unwrap().unwrap()["backdrop_url"], "http://img/w1280/null.jpg");
+        let h = FakeHttp::new(vec![
+            ("/search/tv", json!({"results":[{"id":2}]})),
+            ("/tv/2/season/1/episode/1", json!({"still_path":"/still.jpg"})),
+            ("/tv/2?", json!({"name":"S","backdrop_path":"/bd.jpg"})),
+        ]);
+        let mut t = tmdb(&h);
+        t.cfg.still_size = "w300".into();
+        let m = t.lookup(&Query { title: "S".into(), season: Some(1), episode: Some(1), ..Default::default() }).unwrap().unwrap();
+        assert_eq!((m["still_url"].as_str(), m["backdrop_url"].as_str()), ("http://img/w300/still.jpg", "http://img/bd.jpg"));
+        let h = FakeHttp::new(vec![
+            ("/login", json!({"data":{"token":"T"}})),
+            ("/search", json!({"data":[{"tvdb_id":"9"}]})),
+            ("/series/9/extended", json!({"data":{"artworks":[{"type":2,"image":"http://a/poster.jpg"},{"type":3,"language":null,"image":"http://a/bg0.jpg"},{"type":3,"language":"eng","image":"http://a/bg.jpg"}]}})),
+            ("/series/9/episodes", json!({"data":{"episodes":[{"image":"http://a/ep.jpg"}]}})),
+            ("/series/9", json!({"data":{"id":9,"name":"S"}})),
+        ]);
+        let tv = Tvdb::new(TvdbCfg { api_key: "k".into(), base_url: "http://v".into(), image_language: "eng".into(), ..Default::default() }, &h);
+        let m = tv.lookup(&Query { title: "S".into(), season: Some(1), episode: Some(1), ..Default::default() }).unwrap().unwrap();
+        assert_eq!((m["backdrop_url"].as_str(), m["still_url"].as_str()), ("http://a/bg.jpg", "http://a/ep.jpg"));
+    }
+
+    #[test]
     fn year_filters_in_search_queries() {
         let h = FakeHttp::new(vec![("/search/movie", json!({"results":[{"id":1}]})), ("/movie/1", json!({"title":"Dune"}))]);
         tmdb(&h).lookup(&Query { title: "Dune".into(), year: Some("1984".into()), ..Default::default() }).unwrap();
@@ -404,7 +462,7 @@ mod tests {
             ("/series/7/episodes", json!({"data":{"episodes":[{"name":"E","aired":"2016-07-04"}]}})),
             ("/series/7/extended", json!({"data":{"seasons":[{"number":1,"type":{"type":"dvd"},"image":"http://a/dvd.jpg"},{"number":1,"type":{"type":"official"},"image":"http://a/s1.jpg"}]}})),
         ]);
-        let t = Tvdb::new(TvdbCfg { api_key: "k".into(), pin: "1234".into(), base_url: "http://v".into(), poster_size: "thumbnail".into() }, &h);
+        let t = Tvdb::new(TvdbCfg { api_key: "k".into(), pin: "1234".into(), base_url: "http://v".into(), poster_size: "thumbnail".into(), ..Default::default() }, &h);
         let q = Query { thetvdb: Some("https://www.thetvdb.com/series/the-disastrous-life".into()), season: Some(1), episode: Some(1), ..Default::default() };
         let m = t.lookup(&q).unwrap().unwrap();
         assert_eq!((m["show"].as_str(), m["episode_title"].as_str()), ("Saiki K", "E"));

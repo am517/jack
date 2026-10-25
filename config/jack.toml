@@ -45,6 +45,12 @@ mkv_extensions = ["mkv"]
 embed_artwork = true
 # TV episodes: poster choice in order, falling back to the next ("season", "series").
 tv_poster = ["season", "series"]
+# Art orientation: "poster" or "landscape" (sidecar key art_style, flag --art).
+# Landscape: movies use a backdrop; TV episodes use tv_landscape in order.
+art_style = "poster"
+tv_landscape = ["still", "backdrop"]
+# Style order to try per chosen style (falls back when the first has no art).
+art_fallback = { poster = ["poster", "landscape"], landscape = ["landscape", "poster"] }
 # MKV cover attachment name (Matroska convention: cover.jpg).
 mkv_cover_name = "cover.jpg"
 # Used to list existing MKV attachments.
@@ -90,6 +96,11 @@ base_url = "https://api.themoviedb.org/3"
 image_base = "https://image.tmdb.org/t/p"
 # Poster size: w92 w154 w185 w342 w500 w780 original.
 poster_size = "original"
+# Landscape art sizes: backdrops w300 w780 w1280 original; episode stills w92 w185 w300 original.
+backdrop_size = "original"
+still_size = "original"
+# Preferred backdrop language (backdrops with the title); falls back to textless (null).
+image_language = "en"
 language = "en-US"
 
 [providers.thetvdb]
@@ -99,6 +110,8 @@ pin = ""
 base_url = "https://api4.thetvdb.com/v4"
 # Poster size: "full" or "thumbnail".
 poster_size = "full"
+# Preferred background-art language; falls back to untagged.
+image_language = "eng"
 
 [merge]
 # Composite metadata: for each field, take the first provider in its list that has a value.
@@ -109,6 +122,8 @@ description = ["tmdb", "thetvdb"]
 # Artwork source preference (first provider with art wins).
 poster_url = ["tmdb", "thetvdb"]
 season_poster_url = ["tmdb", "thetvdb"]
+backdrop_url = ["tmdb", "thetvdb"]
+still_url = ["tmdb", "thetvdb"]
 
 [matching]
 # Filename -> title. Applied to the file stem in order: separators become spaces,

@@ -42,6 +42,8 @@ pub struct Settings {
     pub name: Option<String>,
     /// Year override (search filter).
     pub year: Option<String>,
+    /// "poster" or "landscape" (overrides [tagger] art_style).
+    pub art_style: Option<String>,
 }
 
 impl Settings {
@@ -64,6 +66,7 @@ impl Settings {
             youtube: self.youtube.or(l.youtube),
             name: self.name.or(l.name),
             year: self.year.or(l.year),
+            art_style: self.art_style.or(l.art_style),
         }
     }
     pub fn flag(v: Option<bool>) -> bool {
@@ -85,6 +88,9 @@ pub struct TaggerCfg {
     pub mkvextract: String,
     pub mkvmerge: String,
     pub tv_poster: Vec<String>,
+    pub art_style: String,
+    pub tv_landscape: Vec<String>,
+    pub art_fallback: std::collections::BTreeMap<String, Vec<String>>,
     pub mkv_cover_name: String,
     /// rDNS domain ("mean") for MP4 freeform id atoms.
     pub id_domain: String,

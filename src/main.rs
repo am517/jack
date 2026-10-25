@@ -38,6 +38,9 @@ struct Cli {
     /// Release / first-air year (search filter)
     #[arg(long)]
     year: Option<String>,
+    /// Art orientation: poster or landscape
+    #[arg(long, value_parser = ["poster", "landscape"])]
+    art: Option<String>,
     /// Fetch metadata/artwork only (saved beside the file); don't modify media
     #[arg(short, long)]
     download_only: bool,
@@ -65,6 +68,7 @@ impl From<&Cli> for Settings {
             youtube: c.youtube.clone(),
             name: c.name.clone(),
             year: c.year.clone(),
+            art_style: c.art.clone(),
             ..Default::default()
         }
     }
@@ -133,13 +137,25 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<M
     Ok(sorter::merge(&found, &cfg.merge))
 }
 
-fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
+/// The art URL for the effective style (flag > sidecar > [tagger] art_style), with fallbacks.
+fn art_url(meta: &Meta, s: &Settings, cfg: &Config) -> Option<String> {
+    let t = &cfg.tagger;
     let ep = meta.get("kind").is_some_and(|k| k == "episode");
-    let url = if ep {
-        cfg.tagger.tv_poster.iter().find_map(|c| meta.get(if c == "season" { "season_poster_url" } else { "poster_url" }).cloned())
-    } else {
-        meta.get("poster_url").cloned()
+    let style = s.art_style.clone().unwrap_or_else(|| t.art_style.clone());
+    let order = t.art_fallback.get(&style).cloned().unwrap_or_else(|| vec![style.clone()]);
+    let keys = |st: &str| -> Vec<&str> {
+        match (st, ep) {
+            ("landscape", true) => t.tv_landscape.iter().map(|c| if c == "still" { "still_url" } else { "backdrop_url" }).collect(),
+            ("landscape", false) => vec!["backdrop_url"],
+            (_, true) => t.tv_poster.iter().map(|c| if c == "season" { "season_poster_url" } else { "poster_url" }).collect(),
+            _ => vec!["poster_url"],
+        }
     };
+    order.iter().flat_map(|st| keys(st)).find_map(|k| meta.get(k).cloned())
+}
+
+fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
+    let url = art_url(meta, s, cfg);
     if let Some(url) = url {
         let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
         std::fs::write(&pp, http.bytes(&url)?).map_err(|e| format!("{}: {e}", pp.display()))?;
@@ -346,6 +362,67 @@ mod tests {
                 assert_eq!(Command::new("exiftool").args(["-b", "-CoverArt", f]).output().unwrap().stdout, fs::read(&jpg).unwrap());
             }
         }
+    }
+
+    #[test]
+    fn integration_landscape_art_embedded() {
+        use serde_json::json;
+        use std::process::Command;
+        let ok = |t: &str| Command::new("which").arg(t).output().is_ok_and(|o| o.status.success());
+        if !["ffmpeg", "AtomicParsley", "exiftool"].iter().all(|t| ok(t)) {
+            return eprintln!("skip art: tools missing");
+        }
+        let d = tempfile::tempdir().unwrap();
+        let jpg = d.path().join("still.jpg");
+        assert!(Command::new("ffmpeg").args(["-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=16x9", "-frames:v", "1"]).arg(&jpg).status().unwrap().success());
+        let cfgp = d.path().join("c.toml");
+        fs::write(&cfgp, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\nimage_base = \"http://img\"\nstill_size = \"w300\"\n").unwrap();
+        let m = d.path().join("Saiki.K.S01E02.mp4");
+        assert!(Command::new("ffmpeg").args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.2", "-c:v", "mpeg4"]).arg(&m).status().unwrap().success());
+        let h = providers::fake::FakeHttp::new(vec![
+            ("/search/tv", json!({"results":[{"id":42}]})),
+            ("/tv/42/season/1/episode/2", json!({"id":9,"name":"Ep","still_path":"/still.jpg"})),
+            ("/tv/42/season/1?", json!({"poster_path":"/season.jpg"})),
+            ("/tv/42?", json!({"name":"Saiki K","poster_path":"/series.jpg","backdrop_path":"/bd.jpg"})),
+            ("/w300/still.jpg", json!(format!("@{}", jpg.display()))),
+        ]);
+        let (out, failed) = run(&cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--art", "landscape"]), &h).unwrap();
+        assert_eq!(failed, 0, "{out}");
+        assert!(!h.calls.borrow().iter().any(|c| c.contains("season.jpg") || c.contains("bd.jpg")));
+        assert_eq!(Command::new("exiftool").args(["-b", "-CoverArt"]).arg(&m).output().unwrap().stdout, fs::read(&jpg).unwrap());
+    }
+
+    #[test]
+    fn art_style_choice_and_fallbacks() {
+        let cfg = config::load(Some(Path::new("config/jack.toml"))).unwrap();
+        let mk = |kv: &[(&str, &str)]| -> Meta { kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+        let movie = mk(&[("kind", "movie"), ("poster_url", "P"), ("backdrop_url", "B")]);
+        let land = Settings { art_style: Some("landscape".into()), ..Default::default() };
+        assert_eq!(art_url(&movie, &Settings::default(), &cfg).as_deref(), Some("P")); // poster default
+        assert_eq!(art_url(&movie, &land, &cfg).as_deref(), Some("B"));
+        let ep = mk(&[("kind", "episode"), ("poster_url", "SP"), ("season_poster_url", "SEA"), ("backdrop_url", "SB"), ("still_url", "ST")]);
+        assert_eq!(art_url(&ep, &land, &cfg).as_deref(), Some("ST"));
+        let mut e2 = ep.clone();
+        e2.remove("still_url");
+        assert_eq!(art_url(&e2, &land, &cfg).as_deref(), Some("SB"));
+        e2.remove("backdrop_url");
+        assert_eq!(art_url(&e2, &land, &cfg).as_deref(), Some("SEA")); // no landscape -> poster
+        assert_eq!(art_url(&mk(&[("kind", "movie"), ("backdrop_url", "B")]), &Settings::default(), &cfg).as_deref(), Some("B"));
+        // flag > sidecar > config
+        let d = tempfile::tempdir().unwrap();
+        let m = d.path().join("a.mp4");
+        fs::write(&m, "").unwrap();
+        let c = d.path().join("c.toml");
+        fs::write(&c, "[tagger]\nart_style = \"landscape\"\n").unwrap();
+        let cfg = config::load(Some(&c)).unwrap();
+        let eff = |args: &[&str]| {
+            let (s, _) = config::resolve(&Settings::from(&cli(&[&[m.to_str().unwrap()], args].concat())), &cfg.base, &m).unwrap();
+            art_url(&movie, &s, &cfg)
+        };
+        assert_eq!(eff(&[]).as_deref(), Some("B"));
+        fs::write(d.path().join("a.mp4.config"), "art_style = \"poster\"\n").unwrap();
+        assert_eq!(eff(&[]).as_deref(), Some("P"));
+        assert_eq!(eff(&["--art", "landscape"]).as_deref(), Some("B"));
     }
 
     #[test]
