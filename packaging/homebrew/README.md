@@ -8,9 +8,9 @@ brew install am517/tap/jack
 
 ## Embedded API keys (optional)
 
-`jack` reads `JACK_TMDB_TOKEN` and `JACK_TVDB_KEY` at compile time. The formula forwards
-`HOMEBREW_JACK_TMDB_TOKEN` / `HOMEBREW_JACK_TVDB_KEY` if they're set:
-`HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... brew install --build-from-source am517/tap/jack`.
+`jack` reads `JACK_TMDB_TOKEN`, `JACK_TVDB_KEY` and `JACK_OMDB_KEY` at compile time. The formula forwards
+`HOMEBREW_JACK_TMDB_TOKEN` / `HOMEBREW_JACK_TVDB_KEY` / `HOMEBREW_JACK_OMDB_KEY` if they're set:
+`HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... HOMEBREW_JACK_OMDB_KEY=... brew install --build-from-source am517/tap/jack`.
 By default no keys are embedded, so put them in `~/.config/windups/jack/config.toml`.
 Keys embedded in a binary can be extracted, so never ship private keys in a public bottle.
 

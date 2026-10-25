@@ -48,22 +48,29 @@ Database ids (IMDb/TMDB/TheTVDB, plus series/episode ids for TV) are written int
 (MP4 iTunes freeform atoms, MKV global tags) and read back on later runs, so re-tagging skips
 the filename guess. Tag names are under `[tagger.mp4_id_tags]` / `[tagger.mkv_id_tags]`.
 
+OMDb (optional, needs a key) adds ratings (IMDb, Rotten Tomatoes, Metacritic), rated and awards,
+written with the same tag maps (MP4 freeform atoms, e.g. `IMDB_RATING`; MKV simple tags, e.g.
+`LAW_RATING`), plus the iTunes content rating (iTunEXTC) for `rated`. Without a key it is skipped
+with a warning.
+
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:
 
 ```zsh
-JACK_TMDB_TOKEN=... JACK_TVDB_KEY=... cargo build --release
+JACK_TMDB_TOKEN=... JACK_TVDB_KEY=... JACK_OMDB_KEY=... cargo build --release
 ```
 
-Config `[providers.tmdb] read_token`/`api_key` and `[providers.thetvdb] api_key` override embedded keys. The TheTVDB subscriber `pin` is config-only. With neither, Jack reports which key to set. Never commit keys (`.env`, `*.key` and `secrets*` are git-ignored). Keys embedded in a binary can be extracted from it.
+Config `[providers.tmdb] read_token`/`api_key` `[providers.thetvdb] api_key` and `[providers.omdb] api_key` override embedded keys. The TheTVDB subscriber `pin` is config-only. With neither, Jack reports which key to set. Never commit keys (`.env`, `*.key` and `secrets*` are git-ignored). Keys embedded in a binary can be extracted from it.
 
 ## Attribution
 
 - Metadata provided by TheTVDB: https://thetvdb.com
 - This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org
 
-Both lines are also shown in `jack --help`.
+- Ratings, rated and awards from OMDb (The Open Movie Database): https://www.omdbapi.com (courtesy credit; OMDb's terms require none, but limit use to personal, non-commercial purposes)
+
+These lines are also shown in `jack --help`.
 
 ## License
 

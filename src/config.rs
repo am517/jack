@@ -8,9 +8,13 @@ pub const MAIN_CONFIG: &str = ".config/windups/jack/config.toml";
 /// Project keys embedded at build time (never committed). Config values win over these.
 pub const EMBED_TMDB_TOKEN: Option<&str> = option_env!("JACK_TMDB_TOKEN");
 pub const EMBED_TVDB_KEY: Option<&str> = option_env!("JACK_TVDB_KEY");
+pub const EMBED_OMDB_KEY: Option<&str> = option_env!("JACK_OMDB_KEY");
 
 /// Fill empty provider keys from embedded build-time keys (config file value > embedded key).
-pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>, tvdb: Option<&str>) {
+pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>, tvdb: Option<&str>, omdb: Option<&str>) {
+    if p.omdb.api_key.is_empty() {
+        p.omdb.api_key = omdb.unwrap_or_default().to_string();
+    }
     if p.tmdb.read_token.is_empty() && p.tmdb.api_key.is_empty() {
         p.tmdb.read_token = tmdb.unwrap_or_default().to_string();
     }
@@ -98,6 +102,8 @@ pub struct TaggerCfg {
     pub mp4_id_tags: std::collections::BTreeMap<String, String>,
     /// Metadata id key -> MKV simple tag name.
     pub mkv_id_tags: std::collections::BTreeMap<String, String>,
+    /// Also write `rated` as the iTunes content rating (iTunEXTC) in MP4s.
+    pub mp4_content_rating: bool,
 }
 
 #[derive(Deserialize, Debug, Default, Clone)]
@@ -168,7 +174,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
     for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract, &mut c.tagger.mkvmerge] {
         expand_s(s);
     }
-    apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY);
+    apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY, EMBED_OMDB_KEY);
     Ok(c)
 }
 
@@ -209,12 +215,13 @@ mod tests {
     fn config_key_beats_embedded_key() {
         let mut p = crate::providers::ProvidersCfg::default();
         p.thetvdb.api_key = "from-config".into();
-        apply_embedded(&mut p, Some("emb-tmdb"), Some("emb-tvdb"));
+        apply_embedded(&mut p, Some("emb-tmdb"), Some("emb-tvdb"), Some("emb-omdb"));
+        assert_eq!(p.omdb.api_key, "emb-omdb");
         assert_eq!(p.thetvdb.api_key, "from-config");
         assert_eq!(p.tmdb.read_token, "emb-tmdb");
         let mut p = crate::providers::ProvidersCfg::default();
         p.tmdb.api_key = "v3".into();
-        apply_embedded(&mut p, Some("emb-tmdb"), None);
+        apply_embedded(&mut p, Some("emb-tmdb"), None, None);
         assert_eq!((p.tmdb.read_token.as_str(), p.thetvdb.api_key.as_str()), ("", ""));
     }
 }

@@ -8,12 +8,13 @@ mod tagger;
 use clap::Parser;
 use config::{Config, Settings, has_ext, suffixed};
 use meta::Meta;
-use providers::{Http, Provider, Query, Tmdb, Tvdb};
+use providers::{Http, Omdb, Provider, Query, Tmdb, Tvdb};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 const ATTRIBUTION: &str = "Metadata provided by TheTVDB: https://thetvdb.com\n\
-This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org";
+This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org\n\
+Ratings, rated and awards from OMDb (The Open Movie Database): https://www.omdbapi.com";
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "jack", version, about = "Tag and sort movie and TV files", after_help = ATTRIBUTION)]
@@ -115,11 +116,13 @@ fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
 fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<Meta, String> {
     let tmdb = Tmdb { cfg: cfg.providers.tmdb.clone(), http };
     let tvdb = Tvdb::new(cfg.providers.thetvdb.clone(), http);
+    let omdb = Omdb { cfg: cfg.providers.omdb.clone(), http };
     let (mut found, mut errs) = (vec![], vec![]);
     for name in &cfg.providers.order {
         let p: &dyn Provider = match name.as_str() {
             "tmdb" => &tmdb,
             "thetvdb" => &tvdb,
+            "omdb" => &omdb,
             x => return Err(format!("[providers] order: unknown provider '{x}'")),
         };
         match p.lookup(q) {
@@ -430,7 +433,7 @@ mod tests {
         use clap::CommandFactory;
         let h = Cli::command().render_long_help().to_string();
         assert!(h.contains("Metadata provided by TheTVDB: https://thetvdb.com"));
-        assert!(h.contains("not endorsed or certified by TMDB"));
+        assert!(h.contains("not endorsed or certified by TMDB") && h.contains("omdbapi.com"));
     }
 
     #[test]

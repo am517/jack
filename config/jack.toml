@@ -66,6 +66,8 @@ poster_suffix = ".poster.jpg"
 # MP4: iTunes freeform atoms "----:<id_domain>:<name>" (written with AtomicParsley --rDNSatom;
 # exiftool can't write these, so with mp4_tool = "exiftool" ids are still written by AtomicParsley).
 id_domain = "com.apple.iTunes"
+# Also write OMDb "rated" (e.g. PG-13, TV-MA) as the iTunes content rating (iTunEXTC).
+mp4_content_rating = true
 [tagger.mp4_id_tags]
 imdb_id = "IMDB_ID"
 tmdb_id = "TMDB_ID"
@@ -74,6 +76,12 @@ tmdb_series_id = "TMDB_SERIES_ID"
 tmdb_episode_id = "TMDB_EPISODE_ID"
 thetvdb_series_id = "TVDB_SERIES_ID"
 thetvdb_episode_id = "TVDB_EPISODE_ID"
+# OMDb extras (same mechanism; not read back as ids).
+rating_imdb = "IMDB_RATING"
+rating_rotten_tomatoes = "ROTTEN_TOMATOES"
+rating_metacritic = "METACRITIC"
+rated = "RATED"
+awards = "AWARDS"
 # MKV: global simple tags, merged into the existing tags (others, incl. track tags, are kept).
 [tagger.mkv_id_tags]
 imdb_id = "IMDB"
@@ -83,10 +91,16 @@ tmdb_series_id = "TMDB_SERIES"
 tmdb_episode_id = "TMDB_EPISODE"
 thetvdb_series_id = "TVDB_SERIES"
 thetvdb_episode_id = "TVDB_EPISODE"
+rating_imdb = "IMDB_RATING"
+rating_rotten_tomatoes = "ROTTEN_TOMATOES_RATING"
+rating_metacritic = "METACRITIC_RATING"
+rated = "LAW_RATING"
+awards = "AWARDS"
 
 [providers]
 # Providers to query, in order. (IMDb ids given with --imdb are resolved through TMDB.)
-order = ["tmdb", "thetvdb"]
+# OMDb adds ratings (IMDb, Rotten Tomatoes, Metacritic), rated and awards; skipped with a warning without a key.
+order = ["tmdb", "thetvdb", "omdb"]
 
 [providers.tmdb]
 # Get one at https://www.themoviedb.org/settings/api. Set read_token (preferred) or api_key.
@@ -113,17 +127,29 @@ poster_size = "full"
 # Preferred background-art language; falls back to untagged.
 image_language = "eng"
 
+[providers.omdb]
+# Get one at https://www.omdbapi.com/apikey.aspx.
+api_key = ""
+base_url = "https://www.omdbapi.com/"
+plot = "short"
+
 [merge]
 # Composite metadata: for each field, take the first provider in its list that has a value.
-default = ["tmdb", "thetvdb"]
+default = ["tmdb", "thetvdb", "omdb"]
 [merge.fields]
 episode_title = ["thetvdb", "tmdb"]
-description = ["tmdb", "thetvdb"]
+description = ["tmdb", "thetvdb", "omdb"]
 # Artwork source preference (first provider with art wins).
-poster_url = ["tmdb", "thetvdb"]
+poster_url = ["tmdb", "thetvdb", "omdb"]
 season_poster_url = ["tmdb", "thetvdb"]
 backdrop_url = ["tmdb", "thetvdb"]
 still_url = ["tmdb", "thetvdb"]
+# OMDb is the source for ratings, rated and awards; a fallback for plot/poster.
+rating_imdb = ["omdb"]
+rating_rotten_tomatoes = ["omdb"]
+rating_metacritic = ["omdb"]
+rated = ["omdb"]
+awards = ["omdb"]
 
 [matching]
 # Filename -> title. Applied to the file stem in order: separators become spaces,

@@ -13,16 +13,17 @@ class Jack < Formula
 
   def install
     # Optional build-time API keys (never stored in the formula):
-    #   HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... brew install --build-from-source am517/tap/jack
+    #   HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... HOMEBREW_JACK_OMDB_KEY=... brew install --build-from-source am517/tap/jack
     ENV["JACK_TMDB_TOKEN"] = ENV["HOMEBREW_JACK_TMDB_TOKEN"] if ENV["HOMEBREW_JACK_TMDB_TOKEN"].present?
     ENV["JACK_TVDB_KEY"] = ENV["HOMEBREW_JACK_TVDB_KEY"] if ENV["HOMEBREW_JACK_TVDB_KEY"].present?
+    ENV["JACK_OMDB_KEY"] = ENV["HOMEBREW_JACK_OMDB_KEY"] if ENV["HOMEBREW_JACK_OMDB_KEY"].present?
     system "cargo", "install", *std_cargo_args
     pkgshare.install "config/jack.toml" => "config.toml.example"
   end
 
   def caveats
     <<~EOS
-      Copy the example config and add your TMDB / TheTVDB API keys:
+      Copy the example config and add your TMDB / TheTVDB / OMDb API keys:
         mkdir -p ~/.config/windups/jack
         cp #{opt_pkgshare}/config.toml.example ~/.config/windups/jack/config.toml
     EOS

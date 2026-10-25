@@ -62,7 +62,7 @@ pub trait Provider {
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String>;
 }
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct TmdbCfg {
     pub read_token: String,
@@ -78,7 +78,7 @@ pub struct TmdbCfg {
     pub language: String,
 }
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct TvdbCfg {
     /// Preferred language for background art (ISO 639-2, e.g. "eng"); untagged is the fallback.
@@ -90,12 +90,29 @@ pub struct TvdbCfg {
     pub base_url: String,
 }
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct OmdbCfg {
+    pub api_key: String,
+    pub base_url: String,
+    /// "short" or "full".
+    pub plot: String,
+}
+
+/// No Debug on the provider configs: they hold keys. This one prints only the order.
+#[derive(Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct ProvidersCfg {
     pub order: Vec<String>,
     pub tmdb: TmdbCfg,
     pub thetvdb: TvdbCfg,
+    pub omdb: OmdbCfg,
+}
+
+impl std::fmt::Debug for ProvidersCfg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProvidersCfg").field("order", &self.order).finish_non_exhaustive()
+    }
 }
 
 pub fn enc(s: &str) -> String {
@@ -329,6 +346,58 @@ impl Provider for Tvdb<'_> {
     }
 }
 
+/// OMDb (https://www.omdbapi.com): ratings, rated, awards, plot, poster.
+pub struct Omdb<'a> {
+    pub cfg: OmdbCfg,
+    pub http: &'a dyn Http,
+}
+
+impl Provider for Omdb<'_> {
+    fn name(&self) -> &'static str {
+        "omdb"
+    }
+    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+        if self.cfg.api_key.is_empty() {
+            return Err("no api key ([providers.omdb] api_key or --omdb-key); skipped".into());
+        }
+        let mut url = format!("{}?apikey={}&plot={}", self.cfg.base_url, enc(&self.cfg.api_key), enc(&self.cfg.plot));
+        match q.imdb.as_deref().and_then(imdb_id) {
+            Some(i) => url += &format!("&i={i}"),
+            None => {
+                url += &format!("&t={}&type={}", enc(&q.title), if q.is_tv() { "series" } else { "movie" });
+                if let Some(y) = &q.year {
+                    url += &format!("&y={}", enc(y));
+                }
+            }
+        }
+        // never let the key reach an error message
+        let d = self.http.get(&url, &[]).map_err(|e| e.replace(&self.cfg.api_key, "****"))?;
+        if d["Response"].as_str() == Some("False") {
+            return Ok(None);
+        }
+        let g = |k: &str| s(&d[k]).filter(|v| v != "N/A");
+        let mut m = Meta::new();
+        put(&mut m, "title", g("Title"));
+        put(&mut m, "year", g("Year").map(|y| y.chars().take(4).collect()));
+        put(&mut m, "imdb_id", g("imdbID"));
+        put(&mut m, "rated", g("Rated"));
+        put(&mut m, "awards", g("Awards"));
+        put(&mut m, "description", g("Plot"));
+        put(&mut m, "poster_url", g("Poster"));
+        put(&mut m, "rating_imdb", g("imdbRating"));
+        for r in d["Ratings"].as_array().into_iter().flatten() {
+            let k = match r["Source"].as_str() {
+                Some("Internet Movie Database") => "rating_imdb",
+                Some("Rotten Tomatoes") => "rating_rotten_tomatoes",
+                Some("Metacritic") => "rating_metacritic",
+                _ => continue,
+            };
+            put(&mut m, k, s(&r["Value"]).filter(|v| v != "N/A"));
+        }
+        Ok(Some(m))
+    }
+}
+
 #[cfg(test)]
 pub mod fake {
     use super::*;
@@ -404,6 +473,29 @@ mod tests {
         t.cfg.poster_size = "w780".into();
         assert_eq!(t.img(&json!("/x.jpg")).unwrap(), "http://img/w780/x.jpg");
         assert_eq!((m["tmdb_series_id"].as_str(), m["tmdb_episode_id"].as_str(), m["imdb_id"].as_str()), ("42", "4202", "tt5"));
+    }
+
+    #[test]
+    fn omdb_lookup_and_missing_key() {
+        let body = json!({"Response":"True","Title":"Dune","Year":"1984","imdbID":"tt0087182","Rated":"PG-13","Awards":"Nominated for 1 Oscar.","Plot":"A plot.","Poster":"N/A",
+            "Ratings":[{"Source":"Internet Movie Database","Value":"6.3/10"},{"Source":"Rotten Tomatoes","Value":"36%"},{"Source":"Metacritic","Value":"41/100"}]});
+        let h = FakeHttp::new(vec![("http://o/", body)]);
+        let o = Omdb { cfg: OmdbCfg { api_key: "SECRETKEY".into(), base_url: "http://o/".into(), plot: "short".into() }, http: &h };
+        let m = o.lookup(&Query { title: "Dune".into(), year: Some("1984".into()), ..Default::default() }).unwrap().unwrap();
+        assert_eq!((m["rating_imdb"].as_str(), m["rating_rotten_tomatoes"].as_str(), m["rating_metacritic"].as_str()), ("6.3/10", "36%", "41/100"));
+        assert_eq!((m["rated"].as_str(), m["imdb_id"].as_str()), ("PG-13", "tt0087182"));
+        assert!(!m.contains_key("poster_url"), "N/A skipped");
+        assert!(h.calls.borrow().iter().any(|c| c.contains("&t=Dune&type=movie&y=1984")));
+        o.lookup(&Query { title: "x".into(), imdb: Some("tt0087182".into()), season: Some(1), ..Default::default() }).unwrap();
+        assert!(h.calls.borrow().last().unwrap().ends_with("&i=tt0087182"));
+        let h = FakeHttp::new(vec![("http://o/", json!({"Response":"False","Error":"Movie not found!"}))]);
+        let o = Omdb { cfg: OmdbCfg { api_key: "k".into(), base_url: "http://o/".into(), ..Default::default() }, http: &h };
+        assert!(o.lookup(&Query { title: "zz".into(), ..Default::default() }).unwrap().is_none());
+        let o = Omdb { cfg: OmdbCfg::default(), http: &h };
+        assert!(o.lookup(&Query::default()).unwrap_err().contains("skipped"));
+        // errors never leak the key
+        let o = Omdb { cfg: OmdbCfg { api_key: "SECRETKEY".into(), base_url: "http://none/".into(), ..Default::default() }, http: &h };
+        assert!(!o.lookup(&Query::default()).unwrap_err().contains("SECRETKEY"));
     }
 
     #[test]

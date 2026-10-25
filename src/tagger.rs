@@ -29,6 +29,9 @@ fn rdns(a: &mut Vec<String>, m: &Meta, cfg: &TaggerCfg) {
     for (n, v) in ids(m, &cfg.mp4_id_tags) {
         a.extend(["--rDNSatom".into(), v.into(), format!("name={n}"), format!("domain={}", cfg.id_domain)]);
     }
+    if cfg.mp4_content_rating {
+        kv(a, "--contentRating", m.get("rated")); // iTunEXTC; AtomicParsley ignores unknown ratings
+    }
 }
 
 fn xml(s: &str) -> String {
@@ -316,6 +319,21 @@ mod tests {
             m.insert(k.into(), v.into());
         }
         m
+    }
+
+    #[test]
+    fn omdb_ratings_tags() {
+        let mut m = movie();
+        for (k, v) in [("rating_imdb", "6.3/10"), ("rating_rotten_tomatoes", "36%"), ("rating_metacritic", "41/100"), ("rated", "PG-13")] {
+            m.insert(k.into(), v.into());
+        }
+        let c = show(&command(Path::new("a.mp4"), &m, &cfg()).unwrap());
+        assert!(c.contains("--rDNSatom '36%' name=ROTTEN_TOMATOES domain=com.apple.iTunes") && c.contains("--contentRating PG-13"), "{c}");
+        let mut e = cfg();
+        e.mp4_tool = "exiftool".into();
+        assert!(show(&extra_commands(Path::new("a.m4v"), &m, &e)[0]).contains("--contentRating PG-13"));
+        let x = mkv_tags_xml(&m, &cfg(), "").unwrap();
+        assert!(x.contains("<Name>LAW_RATING</Name><String>PG-13</String>") && x.contains("<Name>METACRITIC_RATING</Name><String>41/100</String>"), "{x}");
     }
 
     #[test]
