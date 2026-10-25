@@ -1,9 +1,12 @@
+mod config;
+mod meta;
+mod tagger;
+
 use clap::Parser;
-use serde::Deserialize;
+use config::{Config, Settings, has_ext, suffixed};
+use meta::Meta;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-
-const DEFAULT_CONFIG: &str = include_str!("../config/jack.toml");
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "jack", version, about = "Tag and sort movie and TV files")]
@@ -22,55 +25,18 @@ struct Cli {
     tmdb: Option<String>,
     #[arg(long)]
     youtube: Option<String>,
-    /// Fetch metadata/artwork only; don't modify files
+    /// Fetch metadata/artwork only (saved beside the file); don't modify media
     #[arg(short, long)]
     download_only: bool,
-    /// Apply previously downloaded metadata
+    /// Apply previously downloaded metadata (a .meta.json file, or a directory of them)
     #[arg(short, long)]
     from_file: Option<PathBuf>,
     /// Destination root for sorted files
     #[arg(short, long)]
     output: Option<PathBuf>,
-    /// Show what would change
+    /// Show what would change; change nothing
     #[arg(long)]
     dry_run: bool,
-}
-
-/// One config layer; every field optional so layers can merge.
-#[derive(Deserialize, Debug, Default, Clone, PartialEq)]
-#[serde(default)]
-struct Settings {
-    extensions: Option<Vec<String>>,
-    recursive: Option<bool>,
-    sidecar_suffix: Option<String>,
-    output: Option<PathBuf>,
-    dry_run: Option<bool>,
-    download_only: Option<bool>,
-    from_file: Option<PathBuf>,
-    imdb: Option<String>,
-    thetvdb: Option<String>,
-    tmdb: Option<String>,
-    youtube: Option<String>,
-}
-
-impl Settings {
-    /// Fill unset fields of `self` from `lower`.
-    fn over(self, lower: &Settings) -> Settings {
-        let l = lower.clone();
-        Settings {
-            extensions: self.extensions.or(l.extensions),
-            recursive: self.recursive.or(l.recursive),
-            sidecar_suffix: self.sidecar_suffix.or(l.sidecar_suffix),
-            output: self.output.or(l.output),
-            dry_run: self.dry_run.or(l.dry_run),
-            download_only: self.download_only.or(l.download_only),
-            from_file: self.from_file.or(l.from_file),
-            imdb: self.imdb.or(l.imdb),
-            thetvdb: self.thetvdb.or(l.thetvdb),
-            tmdb: self.tmdb.or(l.tmdb),
-            youtube: self.youtube.or(l.youtube),
-        }
-    }
 }
 
 impl From<&Cli> for Settings {
@@ -89,53 +55,17 @@ impl From<&Cli> for Settings {
     }
 }
 
-fn parse(text: &str, src: &Path) -> Result<Settings, String> {
-    toml::from_str(text).map_err(|e| format!("{}: {e}", src.display()))
-}
-
-fn load_file(p: &Path) -> Result<Option<Settings>, String> {
-    match std::fs::read_to_string(p) {
-        Ok(t) => parse(&t, p).map(Some),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("{}: {e}", p.display())),
-    }
-}
-
-/// Main config layered over built-in defaults (from config/jack.toml).
-fn load_main(explicit: Option<&Path>) -> Result<Settings, String> {
-    let defaults = parse(DEFAULT_CONFIG, Path::new("config/jack.toml (built-in)"))?;
-    let main = match explicit {
-        Some(p) => load_file(p)?.ok_or_else(|| format!("{}: not found", p.display()))?,
-        None => match std::env::var_os("HOME") {
-            Some(h) => load_file(&Path::new(&h).join(".config/jack/config.toml"))?.unwrap_or_default(),
-            None => Settings::default(),
-        },
-    };
-    Ok(main.over(&defaults))
-}
-
-fn sidecar_path(media: &Path, suffix: &str) -> PathBuf {
-    let mut s = media.as_os_str().to_owned();
-    s.push(suffix);
-    PathBuf::from(s)
-}
-
-fn is_media(p: &Path, exts: &[String]) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| exts.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(e)))
-}
-
 fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
     let exts = s.extensions.clone().unwrap_or_default();
     let depth = if s.recursive.unwrap_or(true) { usize::MAX } else { 1 };
     let mut out = Vec::new();
     for p in paths {
+        let p = config::expand(p);
         if p.is_file() {
-            out.push(p.clone()); // explicitly named files are always included
+            out.push(p); // explicitly named files are always included
         } else {
-            for e in walkdir::WalkDir::new(p).max_depth(depth).sort_by_file_name().into_iter().flatten() {
-                if e.file_type().is_file() && is_media(e.path(), &exts) {
+            for e in walkdir::WalkDir::new(&p).max_depth(depth).sort_by_file_name().into_iter().flatten() {
+                if e.file_type().is_file() && has_ext(e.path(), &exts) {
                     out.push(e.into_path());
                 }
             }
@@ -144,56 +74,74 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
     out
 }
 
-/// Resolve effective settings per file: flags > sidecar > main > defaults.
-fn resolve(cli: &Settings, main: &Settings, media: &Path) -> Result<(Settings, bool), String> {
-    let suffix = main.sidecar_suffix.clone().unwrap_or_else(|| ".config".into());
-    let side = load_file(&sidecar_path(media, &suffix))?;
-    let has = side.is_some();
-    Ok((cli.clone().over(&side.unwrap_or_default().over(main)), has))
+/// Metadata for one file from online providers.
+fn fetch(_path: &Path, _s: &Settings, _cfg: &Config) -> Result<Meta, String> {
+    Err("no metadata providers yet (phase 3); use --from-file".into())
 }
 
-fn report(files: &[(PathBuf, Settings, bool)]) -> String {
-    let mut o = format!("jack dry run: {} media file(s) found\n", files.len());
-    for (p, s, side) in files {
-        let _ = writeln!(o, "{}{}", p.display(), if *side { "  [sidecar]" } else { "" });
-        let ids: Vec<String> = [("imdb", &s.imdb), ("tmdb", &s.tmdb), ("thetvdb", &s.thetvdb), ("youtube", &s.youtube)]
-            .iter()
-            .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={v}")))
-            .collect();
-        let _ = writeln!(
-            o,
-            "    ids: {}  output: {}  download_only: {}",
-            if ids.is_empty() { "-".into() } else { ids.join(" ") },
-            s.output.as_ref().map_or("-".into(), |p| p.display().to_string()),
-            s.download_only.unwrap_or(false)
-        );
+fn process(path: &Path, s: &Settings, cfg: &Config, out: &mut String) -> Result<(), String> {
+    let dry = Settings::flag(s.dry_run);
+    let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
+    let meta = match &s.from_file {
+        Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
+        Some(f) => meta::load(f)?,
+        None => fetch(path, s, cfg)?,
+    };
+    if Settings::flag(s.download_only) {
+        let mp = suffixed(path, msuf);
+        if !dry {
+            meta::save(&mp, &meta)?;
+        }
+        let _ = writeln!(out, "    save metadata: {}", mp.display());
+        return Ok(());
     }
-    o
+    let cmd = tagger::command(path, &meta, &cfg.tagger)?;
+    let _ = writeln!(out, "    tag: {}", tagger::show(&cmd));
+    if !dry {
+        tagger::run(&cmd)?;
+    }
+    Ok(())
 }
 
-fn run(cli: &Cli) -> Result<String, String> {
-    let main = load_main(cli.config.as_deref())?;
+fn ids(s: &Settings) -> String {
+    let v: Vec<String> = [("imdb", &s.imdb), ("tmdb", &s.tmdb), ("thetvdb", &s.thetvdb), ("youtube", &s.youtube)]
+        .iter()
+        .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={v}")))
+        .collect();
+    if v.is_empty() { "-".into() } else { v.join(" ") }
+}
+
+/// Returns (report text, number of failed files).
+fn run(cli: &Cli) -> Result<(String, usize), String> {
+    let cfg = config::load(cli.config.as_deref())?;
     let flags = Settings::from(cli);
-    let mut files = Vec::new();
-    for p in scan(&cli.paths, &main) {
-        let (s, side) = resolve(&flags, &main, &p)?;
-        files.push((p, s, side));
+    let files = scan(&cli.paths, &cfg.base);
+    let dry = cli.dry_run || Settings::flag(cfg.base.dry_run);
+    let mut o = format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
+    let mut failed = 0;
+    for p in files {
+        let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
+            let _ = writeln!(o, "{}{}", p.display(), if side { "  [sidecar]" } else { "" });
+            let _ = writeln!(o, "    ids: {}", ids(&s));
+            process(&p, &s, &cfg, &mut o)
+        });
+        if let Err(e) = r {
+            failed += 1;
+            let _ = writeln!(o, "    error: {e}");
+        }
     }
-    let dry = files.iter().all(|f| f.1.dry_run.unwrap_or(false));
-    if dry || files.is_empty() {
-        Ok(report(&files))
-    } else {
-        Ok(format!(
-            "{}\nphase 1: only --dry-run is implemented; nothing was changed.\n",
-            report(&files)
-        ))
-    }
+    Ok((o, failed))
 }
 
 fn main() {
     let cli = Cli::parse();
     match run(&cli) {
-        Ok(s) => print!("{s}"),
+        Ok((s, failed)) => {
+            print!("{s}");
+            if failed > 0 {
+                std::process::exit(1);
+            }
+        }
         Err(e) => {
             eprintln!("jack: {e}");
             std::process::exit(1);
@@ -214,28 +162,37 @@ mod tests {
     fn precedence_flags_sidecar_main_defaults() {
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
-        fs::write(&cfg, "output = \"/main\"\ntmdb = \"main\"\nimdb = \"main\"\n").unwrap();
+        fs::write(&cfg, "output = \"/main\"\ntmdb = \"main\"\nimdb = \"main\"\n[tagger]\nexiftool = \"/x\"\n").unwrap();
         let m = d.path().join("a.mp4");
         fs::write(&m, "").unwrap();
         fs::write(d.path().join("a.mp4.config"), "tmdb = \"side\"\nimdb = \"side\"\n").unwrap();
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--imdb", "flag"]);
-        let main = load_main(c.config.as_deref()).unwrap();
-        let (s, side) = resolve(&Settings::from(&c), &main, &m).unwrap();
+        let main = config::load(c.config.as_deref()).unwrap();
+        assert_eq!(main.tagger.exiftool, "/x");
+        assert_eq!(main.tagger.mkvpropedit, "mkvpropedit"); // deep-merged default
+        let (s, side) = config::resolve(&Settings::from(&c), &main.base, &m).unwrap();
         assert!(side);
         assert_eq!(s.imdb.as_deref(), Some("flag"));
         assert_eq!(s.tmdb.as_deref(), Some("side"));
         assert_eq!(s.output, Some(PathBuf::from("/main")));
-        assert_eq!(s.recursive, Some(true)); // built-in default
+        assert_eq!(s.recursive, Some(true));
         assert!(s.extensions.unwrap().contains(&"mkv".to_string()));
+    }
+
+    #[test]
+    fn tilde_expands() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(config::expand(Path::new("~/x")), PathBuf::from(format!("{home}/x")));
+        assert_eq!(config::expand(Path::new("~bob/x")), PathBuf::from("~bob/x"));
     }
 
     #[test]
     fn extension_filter_case_insensitive() {
         let e = vec!["mp4".to_string(), ".mkv".to_string()];
-        assert!(is_media(Path::new("x/A.MP4"), &e));
-        assert!(is_media(Path::new("b.mkv"), &e));
-        assert!(!is_media(Path::new("b.mp4.config"), &e));
-        assert!(!is_media(Path::new("noext"), &e));
+        assert!(has_ext(Path::new("x/A.MP4"), &e));
+        assert!(has_ext(Path::new("b.mkv"), &e));
+        assert!(!has_ext(Path::new("b.mp4.config"), &e));
+        assert!(!has_ext(Path::new("noext"), &e));
     }
 
     #[test]
@@ -252,22 +209,41 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_output() {
+    fn dry_run_from_file_prints_tag_command() {
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
         fs::write(&cfg, "").unwrap();
-        fs::write(d.path().join("m.m4v"), "").unwrap();
+        let m = d.path().join("m.m4v");
+        fs::write(&m, "x").unwrap();
         fs::write(d.path().join("m.m4v.config"), "tmdb = \"603\"\n").unwrap();
-        let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run"]);
-        let out = run(&c).unwrap();
-        assert!(out.contains("1 media file(s) found"), "{out}");
-        assert!(out.contains("m.m4v  [sidecar]"));
-        assert!(out.contains("tmdb=603"));
-        assert!(!out.contains("nothing was changed"));
+        let mf = d.path().join("m.m4v.meta.json");
+        fs::write(&mf, r#"{"kind":"movie","title":"The Matrix","year":"1999"}"#).unwrap();
+        let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap()]);
+        let (out, failed) = run(&c).unwrap();
+        assert_eq!(failed, 0, "{out}");
+        assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
+        assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
+        assert_eq!(fs::read(&m).unwrap(), b"x"); // untouched
+    }
+
+    #[test]
+    fn download_only_saves_meta_without_touching_media() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("c.toml");
+        fs::write(&cfg, "").unwrap();
+        let m = d.path().join("m.mkv");
+        fs::write(&m, "x").unwrap();
+        let src = d.path().join("src.json");
+        fs::write(&src, r#"{"kind":"movie","title":"T"}"#).unwrap();
+        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-f", src.to_str().unwrap()]);
+        let (out, failed) = run(&c).unwrap();
+        assert_eq!(failed, 0, "{out}");
+        assert_eq!(meta::load(&d.path().join("m.mkv.meta.json")).unwrap()["title"], "T");
+        assert_eq!(fs::read(&m).unwrap(), b"x");
     }
 
     #[test]
     fn missing_explicit_config_errors() {
-        assert!(load_main(Some(Path::new("/nonexistent/jack.toml"))).is_err());
+        assert!(config::load(Some(Path::new("/nonexistent/jack.toml"))).is_err());
     }
 }

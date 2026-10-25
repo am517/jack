@@ -19,3 +19,21 @@ sidecar_suffix = ".config"
 # Show what would change instead of changing anything.
 dry_run = false
 download_only = false
+
+# Where --download-only saves fetched metadata ("<filename><meta_suffix>").
+# --from-file <path> reads it back; give a directory to use "<dir>/<filename><meta_suffix>".
+meta_suffix = ".meta.json"
+
+[tagger]
+# MP4/M4V/MOV writer: "atomicparsley" (iTunes-style atoms, like iVI4) or "exiftool".
+mp4_tool = "atomicparsley"
+# Tool paths (name on PATH or absolute path; ~ is expanded).
+atomicparsley = "AtomicParsley"
+exiftool = "exiftool"
+mkvpropedit = "mkvpropedit"
+mp4_extensions = ["mp4", "m4v", "mov"]
+mkv_extensions = ["mkv"]
+# Embed downloaded poster art when tagging.
+embed_artwork = true
+# AtomicParsley's short description is limited; longer text goes in the long description.
+short_description_max = 250
