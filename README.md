@@ -34,3 +34,10 @@ jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then 
 - Tweakable there: extensions, tag tool and paths, provider order, keys and base URLs, per-field merge priority, filename regexes, sort templates, move/copy.
 
 Packaging: see `packaging/homebrew/` (draft formula for the shared Swarm tap).
+
+## Attribution
+
+- Metadata provided by TheTVDB: https://thetvdb.com
+- This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org
+
+Both lines are also shown in `jack --help`.

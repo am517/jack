@@ -12,8 +12,11 @@ use providers::{Http, Provider, Query, Tmdb, Tvdb};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+const ATTRIBUTION: &str = "Metadata provided by TheTVDB: https://thetvdb.com\n\
+This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org";
+
 #[derive(Parser, Debug, Default)]
-#[command(name = "jack", version, about = "Tag and sort movie and TV files")]
+#[command(name = "jack", version, about = "Tag and sort movie and TV files", after_help = ATTRIBUTION)]
 struct Cli {
     /// Files or directories to process
     #[arg(required = true)]
@@ -236,6 +239,14 @@ mod tests {
         assert_eq!(s.output, Some(PathBuf::from("/main")));
         assert_eq!(s.recursive, Some(true));
         assert!(s.extensions.unwrap().contains(&"mkv".to_string()));
+    }
+
+    #[test]
+    fn help_shows_attribution() {
+        use clap::CommandFactory;
+        let h = Cli::command().render_long_help().to_string();
+        assert!(h.contains("Metadata provided by TheTVDB: https://thetvdb.com"));
+        assert!(h.contains("not endorsed or certified by TMDB"));
     }
 
     #[test]
