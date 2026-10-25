@@ -30,6 +30,7 @@ jack ~/Movies/Inbox --dry-run -o ~/Media          # preview tags + renames; chan
 jack ~/Movies/the.matrix.1999.mp4 --imdb tt0133093 # tag in place
 jack "Dune (1984).mkv" --name "Dune" --year 1984  # override the filename guess
 jack "Dune (1984).mkv" --art landscape             # backdrop / episode still instead of poster
+jack --set --art landscape --providers tmdb,omdb      # save flags as defaults in the main config (no paths: save only)
 jack ~/TV/saiki-k/ --thetvdb https://www.thetvdb.com/series/the-disastrous-life-of-saiki-k -o ~/Media
 jack ~/Movies/Inbox -d                             # download metadata + poster only (<file>.meta.json, <file>.poster.jpg)
 jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then sort

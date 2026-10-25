@@ -2,6 +2,7 @@ mod config;
 mod matcher;
 mod meta;
 mod providers;
+mod setcfg;
 mod sorter;
 mod tagger;
 
@@ -20,8 +21,16 @@ Ratings, rated and awards from OMDb (The Open Movie Database): https://www.omdba
 #[command(name = "jack", version, about = "Tag and sort movie and TV files", after_help = ATTRIBUTION)]
 struct Cli {
     /// Files or directories to process
-    #[arg(required = true)]
     paths: Vec<PathBuf>,
+    /// Save the other option flags as defaults in the main config (then run, if paths are given)
+    #[arg(long)]
+    set: bool,
+    /// Provider order, comma-separated (e.g. tmdb,thetvdb,omdb)
+    #[arg(long, value_delimiter = ',')]
+    providers: Option<Vec<String>>,
+    /// MP4 tag writer: atomicparsley or exiftool
+    #[arg(long, value_parser = ["atomicparsley", "exiftool"])]
+    mp4_tool: Option<String>,
     /// Main config file (default: ~/.config/windups/jack/config.toml)
     #[arg(long)]
     config: Option<PathBuf>,
@@ -221,13 +230,72 @@ fn ids(s: &Settings) -> String {
     if v.is_empty() { "-".into() } else { v.join(" ") }
 }
 
+fn main_config_path(cli: &Cli) -> Result<PathBuf, String> {
+    match &cli.config {
+        Some(p) => Ok(config::expand(p)),
+        None => std::env::var_os("HOME").map(|h| Path::new(&h).join(config::MAIN_CONFIG)).ok_or("HOME not set".into()),
+    }
+}
+
+/// `--set`: save option flags into the main config; per-file identifiers are skipped with a warning.
+fn save_flags(cli: &Cli) -> Result<String, String> {
+    use setcfg::Change;
+    use toml_edit::Value;
+    let mut o = String::new();
+    for (f, set) in [("--imdb", cli.imdb.is_some()), ("--tmdb", cli.tmdb.is_some()), ("--thetvdb", cli.thetvdb.is_some()), ("--youtube", cli.youtube.is_some()), ("--name", cli.name.is_some()), ("--year", cli.year.is_some()), ("--from-file", cli.from_file.is_some())] {
+        if set {
+            let _ = writeln!(o, "warning: {f} is per-file; not saved");
+        }
+    }
+    let s = |k, v: &str| Change { key: k, value: Value::from(v), secret: false };
+    let mut ch = vec![];
+    if let Some(v) = &cli.output {
+        ch.push(s("output", &v.to_string_lossy()));
+    }
+    if let Some(v) = &cli.art {
+        ch.push(s("tagger.art_style", v));
+    }
+    if let Some(v) = &cli.mp4_tool {
+        ch.push(s("tagger.mp4_tool", v));
+    }
+    if let Some(v) = &cli.providers {
+        ch.push(Change { key: "providers.order", value: Value::Array(v.iter().collect()), secret: false });
+    }
+    for (k, on) in [("dry_run", cli.dry_run), ("download_only", cli.download_only)] {
+        if on {
+            ch.push(Change { key: k, value: Value::from(true), secret: false });
+        }
+    }
+    if ch.is_empty() {
+        let _ = writeln!(o, "--set: no option flags to save");
+        return Ok(o);
+    }
+    o += &setcfg::save(&main_config_path(cli)?, config::DEFAULT_CONFIG, &ch)?;
+    Ok(o)
+}
+
 /// Returns (report text, number of failed files).
 fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
-    let cfg = config::load(cli.config.as_deref())?;
+    let mut pre = String::new();
+    if cli.set {
+        pre = save_flags(cli)?;
+        if cli.paths.is_empty() {
+            return Ok((pre, 0));
+        }
+    } else if cli.paths.is_empty() {
+        return Err("no files or directories given (see --help)".into());
+    }
+    let mut cfg = config::load(cli.config.as_deref())?;
+    if let Some(p) = &cli.providers {
+        cfg.providers.order = p.clone();
+    }
+    if let Some(t) = &cli.mp4_tool {
+        cfg.tagger.mp4_tool = t.clone();
+    }
     let flags = Settings::from(cli);
     let files = scan(&cli.paths, &cfg.base);
     let dry = cli.dry_run || Settings::flag(cfg.base.dry_run);
-    let mut o = format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
+    let mut o = pre + &format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
     let mut failed = 0;
     for p in files {
         let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
@@ -426,6 +494,32 @@ mod tests {
         fs::write(d.path().join("a.mp4.config"), "art_style = \"poster\"\n").unwrap();
         assert_eq!(eff(&[]).as_deref(), Some("P"));
         assert_eq!(eff(&["--art", "landscape"]).as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn set_saves_flags_keeps_comments_and_is_idempotent() {
+        let d = tempfile::tempdir().unwrap();
+        let c = d.path().join("sub/c.toml");
+        let cs = c.to_str().unwrap();
+        // missing file: created from the template; identifiers skipped with a warning
+        let (o, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape", "-o", "/out", "--providers", "tmdb,omdb", "--mp4-tool", "exiftool", "--imdb", "tt1", "--name", "X"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        assert!(o.contains("warning: --imdb is per-file; not saved") && o.contains("warning: --name is per-file"), "{o}");
+        assert!(o.contains("tagger.art_style: \"poster\" -> \"landscape\"") && o.contains("output: (unset) -> \"/out\""), "{o}");
+        assert!(!o.contains("media file"), "save-only must not run: {o}");
+        let t = fs::read_to_string(&c).unwrap();
+        assert!(t.contains("# Art orientation: \"poster\" or \"landscape\"") && t.contains("art_style = \"landscape\""));
+        assert!(t.contains("order = [\"tmdb\", \"omdb\"]") && !t.contains("tt1"));
+        let cfg = config::load(Some(&c)).unwrap();
+        assert_eq!((cfg.tagger.mp4_tool.as_str(), cfg.base.output.as_deref()), ("exiftool", Some(Path::new("/out"))));
+        // idempotent
+        let (o, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        assert!(o.contains("tagger.art_style: unchanged") && o.contains("no changes"), "{o}");
+        assert_eq!(fs::read_to_string(&c).unwrap(), t);
+        // save + run
+        let m = d.path().join("a.mp4");
+        fs::write(&m, "").unwrap();
+        let (o, _) = run(&cli(&["--set", "--config", cs, "--dry-run", m.to_str().unwrap()]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        assert!(o.contains("dry_run: false -> true") && o.contains("1 media file(s) found"), "{o}");
     }
 
     #[test]
