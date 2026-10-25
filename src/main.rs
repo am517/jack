@@ -17,7 +17,8 @@ const ATTRIBUTION: &str = "Metadata provided by TheTVDB: https://thetvdb.com\n\
 This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org\n\
 Ratings, rated and awards from OMDb (The Open Movie Database): https://www.omdbapi.com";
 
-#[derive(Parser, Debug, Default)]
+/// No Debug: holds API keys.
+#[derive(Parser, Default)]
 #[command(name = "jack", version, about = "Tag and sort movie and TV files", after_help = ATTRIBUTION)]
 struct Cli {
     /// Files or directories to process
@@ -28,6 +29,18 @@ struct Cli {
     /// Provider order, comma-separated (e.g. tmdb,thetvdb,omdb)
     #[arg(long, value_delimiter = ',')]
     providers: Option<Vec<String>>,
+    /// TMDB read access token (this run; with --set: saved). No value: prompt (hidden)
+    #[arg(long, num_args = 0..=1, require_equals = true, value_name = "TOKEN")]
+    tmdb_token: Option<Option<String>>,
+    /// TheTVDB API key (this run; with --set: saved). No value: prompt (hidden)
+    #[arg(long, num_args = 0..=1, require_equals = true, value_name = "KEY")]
+    tvdb_key: Option<Option<String>>,
+    /// TheTVDB subscriber PIN (this run; with --set: saved). No value: prompt (hidden)
+    #[arg(long, num_args = 0..=1, require_equals = true, value_name = "PIN")]
+    tvdb_pin: Option<Option<String>>,
+    /// OMDb API key (this run; with --set: saved). No value: prompt (hidden)
+    #[arg(long, num_args = 0..=1, require_equals = true, value_name = "KEY")]
+    omdb_key: Option<Option<String>>,
     /// MP4 tag writer: atomicparsley or exiftool
     #[arg(long, value_parser = ["atomicparsley", "exiftool"])]
     mp4_tool: Option<String>,
@@ -230,6 +243,47 @@ fn ids(s: &Settings) -> String {
     if v.is_empty() { "-".into() } else { v.join(" ") }
 }
 
+/// (flag, config key) for each credential flag.
+const SECRETS: [(&str, &str); 4] = [("--tmdb-token", "providers.tmdb.read_token"), ("--tvdb-key", "providers.thetvdb.api_key"), ("--tvdb-pin", "providers.thetvdb.pin"), ("--omdb-key", "providers.omdb.api_key")];
+
+fn secret_fields(cli: &mut Cli) -> [&mut Option<Option<String>>; 4] {
+    [&mut cli.tmdb_token, &mut cli.tvdb_key, &mut cli.tvdb_pin, &mut cli.omdb_key]
+}
+
+/// Fills value-less credential flags via `read` (hidden prompt in `main`).
+fn resolve_secrets(cli: &mut Cli, read: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<(), String> {
+    for (f, (flag, _)) in secret_fields(cli).into_iter().zip(SECRETS) {
+        if let Some(None) = f {
+            let v = read(&format!("{flag}: "))?.trim().to_string();
+            if v.is_empty() {
+                return Err(format!("{flag}: empty value"));
+            }
+            *f = Some(Some(v));
+        }
+    }
+    Ok(())
+}
+
+/// Hidden prompt on a terminal; otherwise one line from stdin (e.g. `echo $KEY | jack --set --omdb-key`).
+fn read_secret(prompt: &str) -> Result<String, String> {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        rpassword::prompt_password(prompt).map_err(|e| format!("reading key: {e}"))
+    } else {
+        let mut s = String::new();
+        std::io::stdin().read_line(&mut s).map_err(|e| format!("reading key from stdin: {e}"))?;
+        Ok(s)
+    }
+}
+
+fn secret_values(cli: &Cli) -> Vec<(&'static str, &'static str, String)> {
+    [&cli.tmdb_token, &cli.tvdb_key, &cli.tvdb_pin, &cli.omdb_key]
+        .into_iter()
+        .zip(SECRETS)
+        .filter_map(|(v, (f, k))| v.clone().flatten().map(|v| (f, k, v)))
+        .collect()
+}
+
 fn main_config_path(cli: &Cli) -> Result<PathBuf, String> {
     match &cli.config {
         Some(p) => Ok(config::expand(p)),
@@ -266,6 +320,9 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
             ch.push(Change { key: k, value: Value::from(true), secret: false });
         }
     }
+    for (_, k, v) in secret_values(cli) {
+        ch.push(Change { key: k, value: Value::from(v), secret: true });
+    }
     if ch.is_empty() {
         let _ = writeln!(o, "--set: no option flags to save");
         return Ok(o);
@@ -292,6 +349,16 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
     if let Some(t) = &cli.mp4_tool {
         cfg.tagger.mp4_tool = t.clone();
     }
+    // credential flags beat config and embedded keys (this run)
+    for (_, k, v) in secret_values(cli) {
+        let p = &mut cfg.providers;
+        *match k {
+            "providers.tmdb.read_token" => &mut p.tmdb.read_token,
+            "providers.thetvdb.api_key" => &mut p.thetvdb.api_key,
+            "providers.thetvdb.pin" => &mut p.thetvdb.pin,
+            _ => &mut p.omdb.api_key,
+        } = v;
+    }
     let flags = Settings::from(cli);
     let files = scan(&cli.paths, &cfg.base);
     let dry = cli.dry_run || Settings::flag(cfg.base.dry_run);
@@ -312,7 +379,11 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    if let Err(e) = resolve_secrets(&mut cli, &mut read_secret) {
+        eprintln!("jack: {e}");
+        std::process::exit(1);
+    }
     match run(&cli, &providers::Ureq) {
         Ok((s, failed)) => {
             print!("{s}");
@@ -520,6 +591,39 @@ mod tests {
         fs::write(&m, "").unwrap();
         let (o, _) = run(&cli(&["--set", "--config", cs, "--dry-run", m.to_str().unwrap()]), &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(o.contains("dry_run: false -> true") && o.contains("1 media file(s) found"), "{o}");
+    }
+
+    #[test]
+    fn credential_flags_run_only_set_masked_and_prompted() {
+        use serde_json::json;
+        let d = tempfile::tempdir().unwrap();
+        let c = d.path().join("c.toml");
+        fs::write(&c, "# my keys\n[providers]\norder = [\"omdb\"]\n[providers.omdb]\napi_key = \"CFGKEY1234\" # keep me\nbase_url = \"http://o/\"\n").unwrap();
+        let m = d.path().join("Dune (1984).mp4");
+        fs::write(&m, "").unwrap();
+        let (cs, ms) = (c.to_str().unwrap(), m.to_str().unwrap());
+        let h = providers::fake::FakeHttp::new(vec![("http://o/", json!({"Title":"Dune","Year":"1984"}))]);
+        // run-only: flag beats config; config untouched; key never printed
+        let (o, _) = run(&cli(&["--config", cs, "--dry-run", "--omdb-key=FLAGKEY5678", ms]), &h).unwrap();
+        assert!(h.calls.borrow().iter().any(|u| u.contains("apikey=FLAGKEY5678")));
+        assert!(!o.contains("FLAGKEY5678") && !o.contains("CFGKEY1234"), "{o}");
+        assert!(fs::read_to_string(&c).unwrap().contains("CFGKEY1234"));
+        // value-less flag prompts through the reader; --set saves masked
+        let mut a = cli(&["--set", "--config", cs, "--omdb-key", "--tvdb-pin=9999"]);
+        let mut asked = vec![];
+        resolve_secrets(&mut a, &mut |p: &str| {
+            asked.push(p.to_string());
+            Ok("NEWKEY0001\n".into())
+        })
+        .unwrap();
+        assert_eq!(asked, ["--omdb-key: "]);
+        let (o, _) = run(&a, &h).unwrap();
+        assert!(o.contains("providers.omdb.api_key: ******** -> ********") && o.contains("providers.thetvdb.pin: (unset) -> ********"), "{o}");
+        assert!(!o.contains("NEWKEY0001") && !o.contains("CFGKEY1234") && !o.contains("9999"), "{o}");
+        let t = fs::read_to_string(&c).unwrap();
+        assert!(t.contains("api_key = \"NEWKEY0001\" # keep me") && t.starts_with("# my keys") && t.contains("pin = \"9999\""), "{t}");
+        let mut e = cli(&["--omdb-key"]);
+        assert!(resolve_secrets(&mut e, &mut |_: &str| Ok(" \n".into())).is_err());
     }
 
     #[test]

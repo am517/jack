@@ -62,6 +62,8 @@ Keys come from the config file first, then from project keys embedded at build t
 JACK_TMDB_TOKEN=... JACK_TVDB_KEY=... JACK_OMDB_KEY=... cargo build --release
 ```
 
+Per run, `--tmdb-token`, `--tvdb-key`, `--tvdb-pin` and `--omdb-key` beat both; with `--set` they are saved into the config. Give them without a value (`jack --set --omdb-key`) to be prompted with hidden input (or pipe the key on stdin), keeping keys out of shell history; inline values need `=` (`--omdb-key=...`). Keys are never printed (masked in `--set` output).
+
 Config `[providers.tmdb] read_token`/`api_key` `[providers.thetvdb] api_key` and `[providers.omdb] api_key` override embedded keys. The TheTVDB subscriber `pin` is config-only. With neither, Jack reports which key to set. Never commit keys (`.env`, `*.key` and `secrets*` are git-ignored). Keys embedded in a binary can be extracted from it.
 
 ## Attribution
