@@ -48,3 +48,9 @@ build the best composite metadata, write it into the files, and sort them into f
 
 ## Done when
 Phases 1–4 tag and sort a real movie and a real TV season on Adam's Mac correctly, with dry-run first.
+
+## Roadmap
+
+- Packaging: Debian/Ubuntu `.deb` (apt; e.g. via `cargo-deb`, optionally an apt repo).
+- Packaging: Arch Linux AUR `PKGBUILD` (pacman; `jack` from the release tarball, maybe `jack-bin`).
+- Packaging: Homebrew bottles (prebuilt macOS/Linux binaries for `am517/tap`, built in CI, so users skip the Rust build).

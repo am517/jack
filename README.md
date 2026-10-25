@@ -41,11 +41,12 @@ jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then 
 - Precedence: flags > sidecar > main config > built-in defaults. `~` is expanded in paths.
 - Tweakable there: extensions, tag tool and paths, provider order, keys and base URLs, per-field merge priority, filename regexes, sort templates, move/copy.
 
-Packaging: see `packaging/homebrew/` (draft formula for the shared Windups tap).
+Packaging: see `packaging/homebrew/` (mirror of the `am517/tap` formula).
 
 Database ids (IMDb/TMDB/TheTVDB, plus series/episode ids for TV) are written into the file
 (MP4 iTunes freeform atoms, MKV global tags) and read back on later runs, so re-tagging skips
 the filename guess. Tag names are under `[tagger.mp4_id_tags]` / `[tagger.mkv_id_tags]`.
+
 ## API keys
 
 Keys come from the config file first, then from project keys embedded at build time:
