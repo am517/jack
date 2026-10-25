@@ -67,6 +67,12 @@ struct Cli {
     /// Fetch metadata/artwork only (saved beside the file); don't modify media
     #[arg(short, long)]
     download_only: bool,
+    /// Print composite metadata to stdout; without -d, modify and write nothing
+    #[arg(short, long)]
+    print: bool,
+    /// --print format: text or json
+    #[arg(long, value_parser = ["text", "json"])]
+    print_format: Option<String>,
     /// Apply previously downloaded metadata (a .meta.json file, or a directory of them)
     #[arg(short, long)]
     from_file: Option<PathBuf>,
@@ -84,6 +90,8 @@ impl From<&Cli> for Settings {
             output: c.output.clone(),
             dry_run: c.dry_run.then_some(true),
             download_only: c.download_only.then_some(true),
+            print: c.print.then_some(true),
+            print_format: c.print_format.clone(),
             from_file: c.from_file.clone(),
             imdb: c.imdb.clone(),
             thetvdb: c.thetvdb.clone(),
@@ -189,15 +197,39 @@ fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &
     Ok(())
 }
 
-fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(), String> {
+/// `--print` output: (text, json entries).
+#[derive(Default)]
+struct Printed {
+    text: String,
+    json: Vec<serde_json::Value>,
+}
+
+fn print_meta(path: &Path, s: &Settings, cfg: &Config, meta: &Meta, p: &mut Printed) {
+    let mut m = meta.clone();
+    if let Some(u) = art_url(meta, s, cfg) {
+        m.insert("art_url".into(), u);
+    }
+    if s.print_format.as_deref() == Some("json") {
+        p.json.push(serde_json::json!({"file": path.to_string_lossy(), "metadata": m}));
+    } else {
+        let _ = writeln!(p.text, "{}", path.display());
+        for (k, v) in &m {
+            let _ = writeln!(p.text, "  {k}: {}", v.replace('\n', " "));
+        }
+        p.text.push('\n');
+    }
+}
+
+fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut String, pr: &mut Printed) -> Result<(), String> {
     let dry = Settings::flag(s.dry_run);
+    let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
     let meta = match &s.from_file {
         Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
         Some(f) => meta::load(f)?,
         None => {
             let mut m = fetch(&query(path, s, cfg)?, cfg, http, out)?;
-            if !dry && (Settings::flag(s.download_only) || cfg.tagger.embed_artwork) {
+            if !dry && (dl || (cfg.tagger.embed_artwork && !print)) {
                 save_poster(path, s, cfg, &mut m, http)?;
             }
             m
@@ -206,7 +238,13 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
     if s.youtube.is_some() {
         let _ = writeln!(out, "    note: --youtube is not supported yet (later phase)");
     }
-    if Settings::flag(s.download_only) {
+    if print {
+        print_meta(path, s, cfg, &meta, pr);
+        if !dl {
+            return Ok(());
+        }
+    }
+    if dl {
         let mp = suffixed(path, msuf);
         if !dry {
             meta::save(&mp, &meta)?;
@@ -315,7 +353,10 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     if let Some(v) = &cli.providers {
         ch.push(Change { key: "providers.order", value: Value::Array(v.iter().collect()), secret: false });
     }
-    for (k, on) in [("dry_run", cli.dry_run), ("download_only", cli.download_only)] {
+    if let Some(v) = &cli.print_format {
+        ch.push(s("print_format", v));
+    }
+    for (k, on) in [("dry_run", cli.dry_run), ("download_only", cli.download_only), ("print", cli.print)] {
         if on {
             ch.push(Change { key: k, value: Value::from(true), secret: false });
         }
@@ -331,13 +372,13 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     Ok(o)
 }
 
-/// Returns (report text, number of failed files).
-fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
+/// Returns (report text, --print output, number of failed files).
+fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     let mut pre = String::new();
     if cli.set {
         pre = save_flags(cli)?;
         if cli.paths.is_empty() {
-            return Ok((pre, 0));
+            return Ok((pre, String::new(), 0));
         }
     } else if cli.paths.is_empty() {
         return Err("no files or directories given (see --help)".into());
@@ -363,19 +404,22 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, usize), String> {
     let files = scan(&cli.paths, &cfg.base);
     let dry = cli.dry_run || Settings::flag(cfg.base.dry_run);
     let mut o = pre + &format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
-    let mut failed = 0;
+    let (mut failed, mut pr) = (0, Printed::default());
     for p in files {
         let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
             let _ = writeln!(o, "{}{}", p.display(), if side { "  [sidecar]" } else { "" });
             let _ = writeln!(o, "    ids: {}", ids(&s));
-            process(&p, &s, &cfg, http, &mut o)
+            process(&p, &s, &cfg, http, &mut o, &mut pr)
         });
         if let Err(e) = r {
             failed += 1;
             let _ = writeln!(o, "    error: {e}");
         }
     }
-    Ok((o, failed))
+    if !pr.json.is_empty() {
+        pr.text += &(serde_json::to_string_pretty(&pr.json).map_err(|e| e.to_string())? + "\n");
+    }
+    Ok((o, pr.text, failed))
 }
 
 fn main() {
@@ -385,8 +429,14 @@ fn main() {
         std::process::exit(1);
     }
     match run(&cli, &providers::Ureq) {
-        Ok((s, failed)) => {
-            print!("{s}");
+        Ok((s, printed, failed)) => {
+            // with --print, stdout carries only the metadata; the report goes to stderr
+            if printed.is_empty() {
+                print!("{s}");
+            } else {
+                eprint!("{s}");
+                print!("{printed}");
+            }
             if failed > 0 {
                 std::process::exit(1);
             }
@@ -488,7 +538,7 @@ mod tests {
             ]);
             let c = cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap()]);
             for _ in 0..2 {
-                let (out, failed) = run(&c, &h).unwrap();
+                let (out, _, failed) = run(&c, &h).unwrap();
                 assert_eq!(failed, 0, "{out}");
             }
             assert!(!h.calls.borrow().iter().any(|c| c.contains("/series.jpg")));
@@ -528,7 +578,7 @@ mod tests {
             ("/tv/42?", json!({"name":"Saiki K","poster_path":"/series.jpg","backdrop_path":"/bd.jpg"})),
             ("/w300/still.jpg", json!(format!("@{}", jpg.display()))),
         ]);
-        let (out, failed) = run(&cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--art", "landscape"]), &h).unwrap();
+        let (out, _, failed) = run(&cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--art", "landscape"]), &h).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert!(!h.calls.borrow().iter().any(|c| c.contains("season.jpg") || c.contains("bd.jpg")));
         assert_eq!(Command::new("exiftool").args(["-b", "-CoverArt"]).arg(&m).output().unwrap().stdout, fs::read(&jpg).unwrap());
@@ -573,7 +623,7 @@ mod tests {
         let c = d.path().join("sub/c.toml");
         let cs = c.to_str().unwrap();
         // missing file: created from the template; identifiers skipped with a warning
-        let (o, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape", "-o", "/out", "--providers", "tmdb,omdb", "--mp4-tool", "exiftool", "--imdb", "tt1", "--name", "X"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (o, _, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape", "-o", "/out", "--providers", "tmdb,omdb", "--mp4-tool", "exiftool", "--imdb", "tt1", "--name", "X"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(o.contains("warning: --imdb is per-file; not saved") && o.contains("warning: --name is per-file"), "{o}");
         assert!(o.contains("tagger.art_style: \"poster\" -> \"landscape\"") && o.contains("output: (unset) -> \"/out\""), "{o}");
         assert!(!o.contains("media file"), "save-only must not run: {o}");
@@ -583,13 +633,13 @@ mod tests {
         let cfg = config::load(Some(&c)).unwrap();
         assert_eq!((cfg.tagger.mp4_tool.as_str(), cfg.base.output.as_deref()), ("exiftool", Some(Path::new("/out"))));
         // idempotent
-        let (o, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (o, _, _) = run(&cli(&["--set", "--config", cs, "--art", "landscape"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(o.contains("tagger.art_style: unchanged") && o.contains("no changes"), "{o}");
         assert_eq!(fs::read_to_string(&c).unwrap(), t);
         // save + run
         let m = d.path().join("a.mp4");
         fs::write(&m, "").unwrap();
-        let (o, _) = run(&cli(&["--set", "--config", cs, "--dry-run", m.to_str().unwrap()]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (o, _, _) = run(&cli(&["--set", "--config", cs, "--dry-run", m.to_str().unwrap()]), &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(o.contains("dry_run: false -> true") && o.contains("1 media file(s) found"), "{o}");
     }
 
@@ -604,7 +654,7 @@ mod tests {
         let (cs, ms) = (c.to_str().unwrap(), m.to_str().unwrap());
         let h = providers::fake::FakeHttp::new(vec![("http://o/", json!({"Title":"Dune","Year":"1984"}))]);
         // run-only: flag beats config; config untouched; key never printed
-        let (o, _) = run(&cli(&["--config", cs, "--dry-run", "--omdb-key=FLAGKEY5678", ms]), &h).unwrap();
+        let (o, _, _) = run(&cli(&["--config", cs, "--dry-run", "--omdb-key=FLAGKEY5678", ms]), &h).unwrap();
         assert!(h.calls.borrow().iter().any(|u| u.contains("apikey=FLAGKEY5678")));
         assert!(!o.contains("FLAGKEY5678") && !o.contains("CFGKEY1234"), "{o}");
         assert!(fs::read_to_string(&c).unwrap().contains("CFGKEY1234"));
@@ -617,7 +667,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(asked, ["--omdb-key: "]);
-        let (o, _) = run(&a, &h).unwrap();
+        let (o, _, _) = run(&a, &h).unwrap();
         assert!(o.contains("providers.omdb.api_key: ******** -> ********") && o.contains("providers.thetvdb.pin: (unset) -> ********"), "{o}");
         assert!(!o.contains("NEWKEY0001") && !o.contains("CFGKEY1234") && !o.contains("9999"), "{o}");
         let t = fs::read_to_string(&c).unwrap();
@@ -679,12 +729,12 @@ mod tests {
         let mf = d.path().join("m.m4v.meta.json");
         fs::write(&mf, r#"{"kind":"movie","title":"The Matrix","year":"1999"}"#).unwrap();
         let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap()]);
-        let (out, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (out, _, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
         assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
         let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap(), "-o", "/srt"]);
-        let (out, _) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (out, _, _) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert!(out.contains("move: /srt/Movies/The Matrix (1999)/The Matrix (1999).m4v"), "{out}");
         assert!(!Path::new("/srt").exists());
         assert_eq!(fs::read(&m).unwrap(), b"x"); // untouched
@@ -700,7 +750,7 @@ mod tests {
         let src = d.path().join("src.json");
         fs::write(&src, r#"{"kind":"movie","title":"T"}"#).unwrap();
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-f", src.to_str().unwrap()]);
-        let (out, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (out, _, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert_eq!(meta::load(&d.path().join("m.mkv.meta.json")).unwrap()["title"], "T");
         assert_eq!(fs::read(&m).unwrap(), b"x");
@@ -720,12 +770,56 @@ mod tests {
             ("/p.jpg", json!(null)),
         ]);
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d"]);
-        let (out, failed) = run(&c, &h).unwrap();
+        let (out, _, failed) = run(&c, &h).unwrap();
         assert_eq!(failed, 0, "{out}");
         let meta = meta::load(&d.path().join("The Matrix.mp4.meta.json")).unwrap();
         assert_eq!(meta["year"], "1999");
         assert_eq!(fs::read(d.path().join("The Matrix.mp4.poster.jpg")).unwrap(), b"JPEG");
         assert_eq!(fs::read(&m).unwrap(), b"x");
+    }
+
+    #[test]
+    fn print_text_json_combined_with_d_and_set() {
+        use serde_json::json;
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("c.toml");
+        fs::write(&cfg, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"SECRETTOK\"\nbase_url = \"http://t\"\n").unwrap();
+        let cs = cfg.to_str().unwrap();
+        let m = d.path().join("The Matrix.mp4");
+        fs::write(&m, "x").unwrap();
+        let ms = m.to_str().unwrap();
+        let h = || providers::fake::FakeHttp::new(vec![
+            ("/search/movie", json!({"results":[{"id":603}]})),
+            ("/movie/603", json!({"title":"The Matrix","release_date":"1999-03-30","poster_path":"/p.jpg","imdb_id":"tt0133093"})),
+            ("/p.jpg", json!(null)),
+        ]);
+        let listing = || { let mut v: Vec<_> = fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name()).collect(); v.sort(); v };
+        let before = listing();
+        // text, print only: nothing written, media untouched
+        let (_, p, failed) = run(&cli(&["--config", cs, "-p", ms]), &h()).unwrap();
+        assert_eq!(failed, 0);
+        assert!(p.starts_with(ms) && p.contains("  title: The Matrix\n") && p.contains("  imdb_id: tt0133093") && p.contains("art_url: ") && p.contains("/p.jpg"), "{p}");
+        assert!(!p.contains("SECRETTOK"));
+        assert_eq!(listing(), before);
+        assert_eq!(fs::read(&m).unwrap(), b"x");
+        // json is clean stdout
+        let (_, p, _) = run(&cli(&["--config", cs, "--print", "--print-format", "json", ms]), &h()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&p).unwrap();
+        assert_eq!(v[0]["file"], ms);
+        assert_eq!(v[0]["metadata"]["year"], "1999");
+        assert_eq!(listing(), before);
+        // -d + --print: both
+        let (_, p, _) = run(&cli(&["--config", cs, "-d", "-p", ms]), &h()).unwrap();
+        assert!(p.contains("title: The Matrix"));
+        assert_eq!(meta::load(&d.path().join("The Matrix.mp4.meta.json")).unwrap()["title"], "The Matrix");
+        assert!(d.path().join("The Matrix.mp4.poster.jpg").exists());
+        assert_eq!(fs::read(&m).unwrap(), b"x");
+        // --set saves print + print_format; config then drives json
+        run(&cli(&["--set", "--config", cs, "-p", "--print-format", "json"]), &h()).unwrap();
+        let t = fs::read_to_string(&cfg).unwrap();
+        assert!(t.contains("print = true") && t.contains("print_format = \"json\""), "{t}");
+        let (_, p, _) = run(&cli(&["--config", cs, ms]), &h()).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&p).unwrap().is_array());
     }
 
     #[test]

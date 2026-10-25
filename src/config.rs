@@ -37,6 +37,10 @@ pub struct Settings {
     pub output: Option<PathBuf>,
     pub dry_run: Option<bool>,
     pub download_only: Option<bool>,
+    /// Print composite metadata to stdout.
+    pub print: Option<bool>,
+    /// "text" or "json".
+    pub print_format: Option<String>,
     pub from_file: Option<PathBuf>,
     pub imdb: Option<String>,
     pub thetvdb: Option<String>,
@@ -63,6 +67,8 @@ impl Settings {
             output: self.output.or(l.output),
             dry_run: self.dry_run.or(l.dry_run),
             download_only: self.download_only.or(l.download_only),
+            print: self.print.or(l.print),
+            print_format: self.print_format.or(l.print_format),
             from_file: self.from_file.or(l.from_file),
             imdb: self.imdb.or(l.imdb),
             thetvdb: self.thetvdb.or(l.thetvdb),

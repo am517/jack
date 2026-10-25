@@ -19,6 +19,10 @@ sidecar_suffix = ".config"
 # Show what would change instead of changing anything.
 dry_run = false
 download_only = false
+# Print composite metadata to stdout (no media changes unless combined with download_only)
+print = false
+# "text" (key: value) or "json"
+print_format = "text"
 
 # Where --download-only saves fetched metadata ("<filename><meta_suffix>").
 # --from-file <path> reads it back; give a directory to use "<dir>/<filename><meta_suffix>".
