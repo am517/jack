@@ -1,2 +1,21 @@
 # Jack configuration. All tweakable behavior lives here, not in code.
-# Settings are added as phases are built; see REQUIREMENTS.md.
+# Copy to ~/.config/jack/config.toml (or pass --config <path>).
+# This file is also compiled in as the fallback defaults.
+# Per-file sidecar: "<filename>.config" beside the media file, same keys.
+# Precedence: CLI flags > sidecar > main config > these defaults.
+
+# Media file extensions to scan for (case-insensitive, no dot).
+extensions = ["mp4", "m4v", "mkv", "mov", "avi"]
+
+# Recurse into subdirectories when given a directory.
+recursive = true
+
+# Suffix appended to a media filename to find its sidecar.
+sidecar_suffix = ".config"
+
+# Destination root for sorted files (phase 4).
+# output = "~/Movies/Sorted"
+
+# Show what would change instead of changing anything.
+dry_run = false
+download_only = false
