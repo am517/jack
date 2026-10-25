@@ -1,0 +1,2 @@
+# Jack configuration. All tweakable behavior lives here, not in code.
+# Settings are added as phases are built; see REQUIREMENTS.md.
