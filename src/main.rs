@@ -65,7 +65,7 @@ struct Cli {
     /// Art orientation: poster or landscape
     #[arg(long, value_parser = ["poster", "landscape"])]
     art: Option<String>,
-    /// iTunes Grouping (MP4 ©grp, MKV GROUPING); usually set in a sidecar
+    /// iTunes Grouping (MP4 ©grp, MKV GROUPING)
     #[arg(long)]
     grouping: Option<String>,
     /// File-name language: original or a language code (see [naming])
@@ -112,9 +112,6 @@ struct Cli {
     /// --print format: text or json
     #[arg(long, value_parser = ["text", "json"])]
     print_format: Option<String>,
-    /// Apply previously downloaded metadata (a .meta.json file, or a directory of them)
-    #[arg(short, long)]
-    from_file: Option<PathBuf>,
     /// Destination root for sorted files
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -139,7 +136,6 @@ impl From<&Cli> for Settings {
             print: tri(c.print, c.no_print),
             recursive: tri(c.recursive, c.no_recursive),
             print_format: c.print_format.clone(),
-            from_file: c.from_file.clone(),
             imdb: c.imdb.clone(),
             thetvdb: c.thetvdb.clone(),
             tmdb: c.tmdb.clone(),
@@ -173,12 +169,12 @@ fn scan(paths: &[PathBuf], s: &Settings) -> Vec<PathBuf> {
     out
 }
 
-/// Query from the filename plus ids from flags/sidecar.
+/// Query from the filename plus ids from flags.
 fn query(path: &Path, s: &Settings, cfg: &Config) -> Result<Query, String> {
     let kind = matcher::forced(s.kind.as_deref());
     let mut q = matcher::parse(path, &cfg.matching, kind)?;
     q.kind = kind.map(String::from);
-    // ids written by an earlier run beat the filename guess; flags/sidecar/config ids beat both.
+    // ids written by an earlier run beat the filename guess; flag/config ids beat both.
     let f = tagger::read_ids(path, &cfg.tagger);
     let g = |k: &str| f.get(k).cloned();
     q.imdb = s.imdb.clone().or(g("imdb_id"));
@@ -279,7 +275,7 @@ fn fetch(q: &Query, cfg: &Config, http: &dyn Http, out: &mut String) -> Result<(
     Ok((m, found))
 }
 
-/// The art URL for the effective style (flag > sidecar > [tagger] art_style), with fallbacks.
+/// The art URL for the effective style (flag > [tagger] art_style), with fallbacks.
 fn art_url(meta: &Meta, s: &Settings, cfg: &Config) -> Option<String> {
     art_keys(meta, s, cfg).into_iter().find_map(|k| meta.get(k).cloned())
 }
@@ -307,11 +303,22 @@ fn art_keys(meta: &Meta, s: &Settings, cfg: &Config) -> Vec<&'static str> {
     v
 }
 
-fn save_poster(path: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
+/// Where downloaded art goes: beside the media with -d, else a temp file (no sidecars).
+fn art_path(path: &Path, s: &Settings, dl: bool) -> PathBuf {
+    let suf = s.poster_suffix.as_deref().unwrap_or(".poster.jpg");
+    if dl {
+        return suffixed(path, suf);
+    }
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = format!("jack-{}-{n}-{}{suf}", std::process::id(), path.file_name().unwrap_or_default().to_string_lossy());
+    std::env::temp_dir().join(name)
+}
+
+fn save_poster(pp: &Path, s: &Settings, cfg: &Config, meta: &mut Meta, http: &dyn Http) -> Result<(), String> {
     let url = art_url(meta, s, cfg);
     if let Some(url) = url {
-        let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
-        std::fs::write(&pp, http.bytes(&url)?).map_err(|e| format!("{}: {e}", pp.display()))?;
+        std::fs::write(pp, http.bytes(&url)?).map_err(|e| format!("{}: {e}", pp.display()))?;
         meta.insert("poster_file".into(), pp.to_string_lossy().into_owned());
     }
     Ok(())
@@ -344,36 +351,30 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
     let dry = Settings::flag(s.dry_run);
     let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
-    let mut meta = match &s.from_file {
-        Some(f) if f.is_dir() => meta::load(&f.join(format!("{}{msuf}", path.file_name().unwrap().to_string_lossy())))?,
-        Some(f) => meta::load(f)?,
-        None => {
-            let (mut m, found) = fetch(&query(path, s, cfg)?, cfg, http, out)?;
-            let t = &cfg.tagger;
-            if !dry && t.ask_art && (dl || (t.embed_artwork && !print)) {
-                let prefs = |k: &str| cfg.merge.fields.get(k).unwrap_or(&cfg.merge.default).clone();
-                let c = askart::candidates(&found, all_images(&found, cfg, http), &art_keys(&m, s, cfg), prefs, t.ask_art_max);
-                let pp = suffixed(path, s.poster_suffix.as_deref().unwrap_or(".poster.jpg"));
-                let open = (t.ask_art_open_folder.unwrap_or(cfg!(target_os = "macos")) && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
-                let o = askart::Opts { open_cmd: open, keep: dl || t.ask_art_keep };
-                match askart::ask(path, &pp, &c, http, &o, out) {
-                    Ok(Some(p)) => {
-                        m.insert("poster_file".into(), p.to_string_lossy().into_owned());
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        let _ = writeln!(out, "    warning: artwork: {e}");
-                    }
-                }
-            } else if !dry && (dl || (t.embed_artwork && !print)) {
-                // art is optional: never lose the metadata over it
-                if let Err(e) = save_poster(path, s, cfg, &mut m, http) {
-                    let _ = writeln!(out, "    warning: artwork: {e}");
-                }
+    let (mut meta, found) = fetch(&query(path, s, cfg)?, cfg, http, out)?;
+    let t = &cfg.tagger;
+    // art is kept beside the file only with -d; otherwise it's a temp file removed after tagging
+    let pp = art_path(path, s, dl);
+    if !dry && t.ask_art && (dl || (t.embed_artwork && !print)) {
+        let prefs = |k: &str| cfg.merge.fields.get(k).unwrap_or(&cfg.merge.default).clone();
+        let c = askart::candidates(&found, all_images(&found, cfg, http), &art_keys(&meta, s, cfg), prefs, t.ask_art_max);
+        let open = (t.ask_art_open_folder.unwrap_or(cfg!(target_os = "macos")) && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
+        let o = askart::Opts { open_cmd: open, keep: dl || t.ask_art_keep };
+        match askart::ask(path, &pp, &c, http, &o, out) {
+            Ok(Some(p)) => {
+                meta.insert("poster_file".into(), p.to_string_lossy().into_owned());
             }
-            m
+            Ok(None) => {}
+            Err(e) => {
+                let _ = writeln!(out, "    warning: artwork: {e}");
+            }
         }
-    };
+    } else if !dry && (dl || (t.embed_artwork && !print)) {
+        // art is optional: never lose the metadata over it
+        if let Err(e) = save_poster(&pp, s, cfg, &mut meta, http) {
+            let _ = writeln!(out, "    warning: artwork: {e}");
+        }
+    }
     if let Some(g) = &s.grouping {
         meta.insert("grouping".into(), g.clone());
     }
@@ -398,18 +399,27 @@ fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut S
     if let Some(i) = s.imdb.as_deref().and_then(providers::imdb_id) {
         meta.entry("imdb_id".into()).or_insert(i);
     }
-    let cmd = tagger::command(path, &meta, &cfg.tagger)?;
-    for c in std::iter::once(cmd).chain(tagger::extra_commands(path, &meta, &cfg.tagger)) {
-        let _ = writeln!(out, "    tag: {}", tagger::show(&c));
-        if !dry {
-            tagger::run(&c)?;
-        }
+    let tagged = tag(path, &meta, cfg, dry, out);
+    if let Some(p) = meta.get("poster_file") {
+        let _ = std::fs::remove_file(p);
     }
+    tagged?;
     if s.output.is_some() || cfg.sort.enabled {
         let to = sorter::destination(s.output.as_deref(), path, &meta, &cfg.sort, &cfg.naming);
         let _ = writeln!(out, "    {}: {}", cfg.sort.mode, to.display());
         if !dry {
             sorter::apply(path, &to, &cfg.sort)?;
+        }
+    }
+    Ok(())
+}
+
+fn tag(path: &Path, meta: &Meta, cfg: &Config, dry: bool, out: &mut String) -> Result<(), String> {
+    let cmd = tagger::command(path, meta, &cfg.tagger)?;
+    for c in std::iter::once(cmd).chain(tagger::extra_commands(path, meta, &cfg.tagger)) {
+        let _ = writeln!(out, "    tag: {}", tagger::show(&c));
+        if !dry {
+            tagger::run(&c)?;
         }
     }
     Ok(())
@@ -482,7 +492,7 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
     use setcfg::Change;
     use toml_edit::Value;
     let mut o = String::new();
-    for (f, set) in [("--imdb", cli.imdb.is_some()), ("--tmdb", cli.tmdb.is_some()), ("--thetvdb", cli.thetvdb.is_some()), ("--youtube", cli.youtube.is_some()), ("--name", cli.name.is_some()), ("--year", cli.year.is_some()), ("--from-file", cli.from_file.is_some())] {
+    for (f, set) in [("--imdb", cli.imdb.is_some()), ("--tmdb", cli.tmdb.is_some()), ("--thetvdb", cli.thetvdb.is_some()), ("--youtube", cli.youtube.is_some()), ("--name", cli.name.is_some()), ("--year", cli.year.is_some())] {
         if set {
             let _ = writeln!(o, "warning: {f} is per-file; not saved");
         }
@@ -510,7 +520,7 @@ fn save_flags(cli: &Cli) -> Result<String, String> {
         }
     }
     if let Some(v) = &cli.grouping {
-        let _ = writeln!(o, "warning: --grouping is usually per-file (sidecar); saved as the default for all files");
+        let _ = writeln!(o, "warning: --grouping is usually per-file; saved as the default for all files");
         ch.push(s("grouping", v));
     }
     if let Some(v) = &cli.print_format {
@@ -590,10 +600,8 @@ fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize), String> {
     let mut o = pre + &format!("jack{}: {} media file(s) found\n", if dry { " dry run" } else { "" }, files.len());
     let (mut failed, mut pr) = (0, Printed::default());
     for p in files {
-        let r = config::resolve(&flags, &cfg.base, &p).and_then(|(s, side)| {
-            let _ = writeln!(o, "{}{}", p.display(), if side { "  [sidecar]" } else { "" });
-            process(&p, &s, &cfg, http, &mut o, &mut pr)
-        });
+        let _ = writeln!(o, "{}", p.display());
+        let r = process(&p, &config::resolve(&flags, &cfg.base), &cfg, http, &mut o, &mut pr);
         if let Err(e) = r {
             failed += 1;
             let _ = writeln!(o, "    error: {e}");
@@ -641,21 +649,20 @@ mod tests {
     }
 
     #[test]
-    fn precedence_flags_sidecar_main_defaults() {
+    fn precedence_flags_main_defaults() {
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
         fs::write(&cfg, "output = \"/main\"\ntmdb = \"main\"\nimdb = \"main\"\n[tagger]\nexiftool = \"/x\"\n").unwrap();
         let m = d.path().join("a.mp4");
         fs::write(&m, "").unwrap();
-        fs::write(d.path().join("a.mp4.config"), "tmdb = \"side\"\nimdb = \"side\"\n").unwrap();
+        fs::write(d.path().join("a.mp4.config"), "tmdb = \"side\"\n").unwrap(); // sidecars are ignored
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--imdb", "flag"]);
         let main = config::load(c.config.as_deref()).unwrap();
         assert_eq!(main.tagger.exiftool, "/x");
         assert_eq!(main.tagger.mkvpropedit, "mkvpropedit"); // deep-merged default
-        let (s, side) = config::resolve(&Settings::from(&c), &main.base, &m).unwrap();
-        assert!(side);
+        let s = config::resolve(&Settings::from(&c), &main.base);
         assert_eq!(s.imdb.as_deref(), Some("flag"));
-        assert_eq!(s.tmdb.as_deref(), Some("side"));
+        assert_eq!(s.tmdb.as_deref(), Some("main"));
         assert_eq!(s.output, Some(PathBuf::from("/main")));
         assert_eq!(s.recursive, Some(true));
         assert!(s.extensions.unwrap().contains(&"mkv".to_string()));
@@ -666,12 +673,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let m = d.path().join("Dune.2021.mkv");
         fs::write(&m, "").unwrap();
-        fs::write(d.path().join("Dune.2021.mkv.config"), "name = \"Dune Part One\"\nyear = \"1999\"\n").unwrap();
         let cfg = config::load(Some(Path::new("config/jack.toml"))).unwrap();
-        let c = cli(&[m.to_str().unwrap(), "--year", "2021"]);
-        let (s, _) = config::resolve(&Settings::from(&c), &cfg.base, &m).unwrap();
+        let c = cli(&[m.to_str().unwrap(), "--name", "Dune Part One", "--year", "2021"]);
+        let s = config::resolve(&Settings::from(&c), &cfg.base);
         let q = query(&m, &s, &cfg).unwrap();
-        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune Part One", Some("2021"))); // sidecar name, flag year
+        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune Part One", Some("2021")));
         let q = query(&m, &Settings::default(), &cfg).unwrap();
         assert_eq!((q.title.as_str(), q.year.as_deref()), ("Dune", Some("2021")));
     }
@@ -783,7 +789,7 @@ mod tests {
         e2.remove("backdrop_url");
         assert_eq!(art_url(&e2, &land, &cfg).as_deref(), Some("SEA")); // no landscape -> poster
         assert_eq!(art_url(&mk(&[("kind", "movie"), ("backdrop_url", "B")]), &Settings::default(), &cfg).as_deref(), Some("B"));
-        // flag > sidecar > config
+        // flag > config
         let d = tempfile::tempdir().unwrap();
         let m = d.path().join("a.mp4");
         fs::write(&m, "").unwrap();
@@ -791,12 +797,11 @@ mod tests {
         fs::write(&c, "[tagger]\nart_style = \"landscape\"\n").unwrap();
         let cfg = config::load(Some(&c)).unwrap();
         let eff = |args: &[&str]| {
-            let (s, _) = config::resolve(&Settings::from(&cli(&[&[m.to_str().unwrap()], args].concat())), &cfg.base, &m).unwrap();
+            let s = config::resolve(&Settings::from(&cli(&[&[m.to_str().unwrap()], args].concat())), &cfg.base);
             art_url(&movie, &s, &cfg)
         };
         assert_eq!(eff(&[]).as_deref(), Some("B"));
-        fs::write(d.path().join("a.mp4.config"), "art_style = \"poster\"\n").unwrap();
-        assert_eq!(eff(&[]).as_deref(), Some("P"));
+        assert_eq!(eff(&["--art", "poster"]).as_deref(), Some("P"));
         assert_eq!(eff(&["--art", "landscape"]).as_deref(), Some("B"));
     }
 
@@ -902,42 +907,33 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_from_file_prints_tag_command() {
+    fn dry_run_prints_tag_command() {
+        use serde_json::json;
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
-        fs::write(&cfg, "").unwrap();
+        fs::write(&cfg, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n").unwrap();
         let m = d.path().join("m.m4v");
         fs::write(&m, "x").unwrap();
-        fs::write(d.path().join("m.m4v.config"), "tmdb = \"603\"\n").unwrap();
-        let mf = d.path().join("m.m4v.meta.json");
-        fs::write(&mf, r#"{"kind":"movie","title":"The Matrix","year":"1999"}"#).unwrap();
-        let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap()]);
-        let (out, _, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let h = || providers::fake::FakeHttp::new(vec![("/movie/603", json!({"title":"The Matrix","release_date":"1999-03-30","poster_path":"/p.jpg"})), ("/p.jpg", json!(null))]);
+        let base = [d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "--tmdb", "603"];
+        let (out, _, failed) = run(&cli(&base), &h()).unwrap();
         assert_eq!(failed, 0, "{out}");
-        assert!(out.contains("1 media file(s) found") && out.contains("m.m4v  [sidecar]"), "{out}");
+        assert!(out.contains("1 media file(s) found") && !out.contains("sidecar"), "{out}");
         assert!(out.contains("tmdb=603") && out.contains("--title 'The Matrix' --year 1999"), "{out}");
         assert!(!out.contains("move:"), "no sorting without -o / [sort] enabled: {out}");
-        let c = cli(&[d.path().to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-f", d.path().to_str().unwrap(), "-o", "/srt"]);
-        let (out, _, _) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
+        let (out, _, _) = run(&cli(&[&base[..], &["-o", "/srt"]].concat()), &h()).unwrap();
         assert!(out.contains("move: /srt/The Matrix/The Matrix (1999).m4v"), "{out}");
         assert!(!Path::new("/srt").exists());
         assert_eq!(fs::read(&m).unwrap(), b"x"); // untouched
+        assert_eq!(fs::read_dir(d.path()).unwrap().count(), 2, "no files written beside the media");
     }
 
     #[test]
-    fn download_only_saves_meta_without_touching_media() {
-        let d = tempfile::tempdir().unwrap();
-        let cfg = d.path().join("c.toml");
-        fs::write(&cfg, "").unwrap();
-        let m = d.path().join("m.mkv");
-        fs::write(&m, "x").unwrap();
-        let src = d.path().join("src.json");
-        fs::write(&src, r#"{"kind":"movie","title":"T"}"#).unwrap();
-        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-f", src.to_str().unwrap()]);
-        let (out, _, failed) = run(&c, &providers::fake::FakeHttp::new(vec![])).unwrap();
-        assert_eq!(failed, 0, "{out}");
-        assert_eq!(meta::load(&d.path().join("m.mkv.meta.json")).unwrap()["title"], "T");
-        assert_eq!(fs::read(&m).unwrap(), b"x");
+    fn art_is_a_temp_file_unless_download_only() {
+        let m = Path::new("/media/a.mp4");
+        assert_eq!(art_path(m, &Settings::default(), true), PathBuf::from("/media/a.mp4.poster.jpg"));
+        let t = art_path(m, &Settings::default(), false);
+        assert!(t.starts_with(std::env::temp_dir()) && t.to_string_lossy().ends_with("a.mp4.poster.jpg"), "{t:?}");
     }
 
     #[test]
@@ -1025,7 +1021,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let c = d.path().join("c.toml");
         let cs = c.to_str().unwrap();
-        let none = || providers::fake::FakeHttp::new(vec![]);
+        fs::write(&c, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n").unwrap();
+        let none = || providers::fake::FakeHttp::new(vec![("/movie/1", serde_json::json!({"title":"T"}))]);
         run(&cli(&["--set", "--config", cs, "-p", "--no-embed-artwork"]), &none()).unwrap();
         let (o, _, _) = run(&cli(&["--set", "--config", cs, "--no-print", "--no-recursive", "--no-dry-run"]), &none()).unwrap();
         assert!(o.contains("print: true -> false"), "{o}");
@@ -1036,10 +1033,8 @@ mod tests {
         let sub = d.path().join("a/b");
         fs::create_dir_all(&sub).unwrap();
         fs::write(sub.join("m.mkv"), "x").unwrap();
-        fs::write(d.path().join("src.json"), r#"{"kind":"movie","title":"T"}"#).unwrap();
-        let src = d.path().join("src.json");
         let dir = d.path().join("a");
-        let args = |extra: &[&str]| { let mut v = vec![dir.to_str().unwrap(), "--config", cs, "--dry-run", "-f", src.to_str().unwrap()]; v.extend(extra); cli(&v) };
+        let args = |extra: &[&str]| { let mut v = vec![dir.to_str().unwrap(), "--config", cs, "--dry-run", "--tmdb", "1"]; v.extend(extra); cli(&v) };
         let (o, p, _) = run(&args(&[]), &none()).unwrap();
         assert!(o.contains("0 media file(s)") && p.is_empty(), "{o}");
         let (o, p, _) = run(&args(&["--recursive", "--no-print"]), &none()).unwrap();
@@ -1140,7 +1135,7 @@ mod tests {
         let log = ui_log();
         assert!(log.contains("invalid choice 'x'") && log.contains("invalid choice '9'") && out.contains("chose #2 (omdb poster)"), "{log}{out}");
         // s = skip: nothing embedded
-        fs::remove_file(d.path().join("The.Matrix.1999.mp4.poster.jpg")).unwrap();
+        assert!(!d.path().join("The.Matrix.1999.mp4.poster.jpg").exists() && !fs::read_dir(std::env::temp_dir()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with("-The.Matrix.1999.mp4.poster.jpg")), "temp art removed after tagging");
         ui("s\n", true);
         let (out, _, _) = run(&cli(&["--config", cs, "--ask-art", ms]), &h()).unwrap();
         assert!(out.contains("ask-art: skipped") && !out.contains("--artwork"), "{out}");

@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub type Meta = BTreeMap<String, String>;
 
+#[cfg(test)]
 pub fn load(p: &Path) -> Result<Meta, String> {
     let t = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
     serde_json::from_str(&t).map_err(|e| format!("{}: {e}", p.display()))

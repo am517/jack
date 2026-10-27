@@ -1,4 +1,4 @@
-//! Config loading: built-in defaults < main config < sidecar < CLI flags.
+//! Config loading: built-in defaults < main config < CLI flags. No sidecars (the database is the source of truth).
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -25,13 +25,12 @@ pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>
 
 pub const DEFAULT_CONFIG: &str = include_str!("../config/jack.toml");
 
-/// Per-file options (main config top level, sidecar, flags); all optional so layers merge.
+/// Options (main config top level, flags); all optional so layers merge.
 #[derive(Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(default)]
 pub struct Settings {
     pub extensions: Option<Vec<String>>,
     pub recursive: Option<bool>,
-    pub sidecar_suffix: Option<String>,
     pub meta_suffix: Option<String>,
     pub poster_suffix: Option<String>,
     pub output: Option<PathBuf>,
@@ -41,7 +40,6 @@ pub struct Settings {
     pub print: Option<bool>,
     /// "text" or "json".
     pub print_format: Option<String>,
-    pub from_file: Option<PathBuf>,
     pub imdb: Option<String>,
     pub thetvdb: Option<String>,
     pub tmdb: Option<String>,
@@ -66,7 +64,6 @@ impl Settings {
         Settings {
             extensions: self.extensions.or(l.extensions),
             recursive: self.recursive.or(l.recursive),
-            sidecar_suffix: self.sidecar_suffix.or(l.sidecar_suffix),
             meta_suffix: self.meta_suffix.or(l.meta_suffix),
             poster_suffix: self.poster_suffix.or(l.poster_suffix),
             output: self.output.or(l.output),
@@ -74,7 +71,6 @@ impl Settings {
             download_only: self.download_only.or(l.download_only),
             print: self.print.or(l.print),
             print_format: self.print_format.or(l.print_format),
-            from_file: self.from_file.or(l.from_file),
             imdb: self.imdb.or(l.imdb),
             thetvdb: self.thetvdb.or(l.thetvdb),
             tmdb: self.tmdb.or(l.tmdb),
@@ -207,21 +203,11 @@ pub fn suffixed(media: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-pub fn load_sidecar(p: &Path) -> Result<Option<Settings>, String> {
-    read(p)?
-        .map(|t| toml::from_str(&t).map_err(|e| format!("{}: {e}", p.display())))
-        .transpose()
-}
-
-/// Effective settings for one file: flags > sidecar > main config. Returns (settings, had_sidecar).
-pub fn resolve(flags: &Settings, main: &Settings, media: &Path) -> Result<(Settings, bool), String> {
-    let suffix = main.sidecar_suffix.clone().unwrap_or_else(|| ".config".into());
-    let side = load_sidecar(&suffixed(media, &suffix))?;
-    let has = side.is_some();
-    let mut s = flags.clone().over(&side.unwrap_or_default().over(main));
+/// Effective settings for one file: flags > main config.
+pub fn resolve(flags: &Settings, main: &Settings) -> Settings {
+    let mut s = flags.clone().over(main);
     s.output = s.output.as_deref().map(expand);
-    s.from_file = s.from_file.as_deref().map(expand);
-    Ok((s, has))
+    s
 }
 
 pub fn has_ext(p: &Path, exts: &[String]) -> bool {

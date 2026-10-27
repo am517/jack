@@ -5,7 +5,7 @@ Rust CLI that tags and sorts movie and TV files (replaces iVI4 Pro). First app i
 - Requirements: [REQUIREMENTS.md](REQUIREMENTS.md)
 - Config: `config/jack.toml` (keep tweakable values here, not hard-coded)
 
-Status: phases 1-4 done: CLI, config + sidecar, scan, tag writing, TMDB/TheTVDB lookup, filename matching, composite merge, sort/rename.
+Status: phases 1-4 done: CLI, config, scan, tag writing, TMDB/TheTVDB lookup, filename matching, composite merge, sort/rename.
 
 ## Install
 
@@ -33,18 +33,17 @@ jack "Dune (1984).mkv" --art landscape             # backdrop / episode still in
 jack --set --art landscape --providers tmdb,omdb      # save flags as defaults in the main config (no paths: save only)
 jack ~/TV/saiki-k/ --thetvdb https://www.thetvdb.com/series/the-disastrous-life-of-saiki-k -o ~/Media
 jack ~/Movies/Inbox -d                             # download metadata + poster only (<file>.meta.json, <file>.poster.jpg)
-jack Cosmos.mkv --tv                               # force TV (or --movie / --type auto|tv|movie; config/sidecar: type = "tv")
+jack Cosmos.mkv --tv                               # force TV (or --movie / --type auto|tv|movie; config: type = "tv")
 jack ~/Movies --no-print --no-recursive             # every on/off flag has a --no-X form (last wins); --set saves false too
 jack movie.mp4 -p                                   # print merged metadata (ids, ratings, art URL); changes/writes nothing
 jack movie.mp4 -p --print-format json > m.json     # JSON array on stdout (report/warnings on stderr); -d -p = save files and print
-jack ~/Movies/Inbox -f ~/Movies/Inbox -o ~/Media   # apply saved metadata, then sort
 ```
 
 ## Config
 
 - Main config: `~/.config/windups/jack/config.toml` or `--config <path>`; deep-merged over the built-in defaults in `config/jack.toml`, which documents every key.
-- Per-file sidecar: `<file>.config` (e.g. `movie.mp4.config`) with the same keys as the flags (`imdb`, `tmdb`, `thetvdb`, `output`, `dry_run`, ...).
-- Precedence: flags > sidecar > main config > built-in defaults. `~` is expanded in paths.
+- No sidecars: per-file values (`--name`, `--year`, ids, `--grouping`) are flags; jack never reads `<file>.*` files. `-d` output is for you; jack doesn't read it back. Art is a temp file, deleted after embedding (kept beside the file only with `-d`).
+- Precedence: flags > main config > built-in defaults. `~` is expanded in paths.
 - Tweakable there: extensions, tag tool and paths, provider order, keys and base URLs, per-field merge priority, filename regexes, sort templates, move/copy.
 
 Packaging: see `packaging/homebrew/` (mirror of the `am517/tap` formula).
@@ -63,14 +62,15 @@ with a warning.
 - `[providers] language = "en"` sets the metadata/tag language (TMDB `language`, TheTVDB translations via `language_codes`, e.g. en -> eng).
 - `keep_original = true` also stores original-language names (`original_title`, `original_show`, `original_episode_title`) in meta.json, `--print`, MP4 freeform atoms (`ORIGINAL_TITLE`, ...) and MKV tags; `original_in_description` appends the original title to the description. Templates can use `{original_title}` / `{original_show}`.
 - `[naming] file_language` (default `"original"`) and `folder_language` (default `"en"`) pick names for files and folders, e.g. `TV/The Apothecary Diaries/Season 03/薬屋のひとりごと - S03E01 - 蝗.mp4`. Missing names fall back to the other language. Save with `--set --file-language en --folder-language original`.
-- Names are NFC-normalized, illegal/control characters replaced, trailing dots/spaces trimmed, and each component capped at `max_component_bytes` (255).
+- Names are NFC-normalized, illegal/control characters replaced, trailing dots/spaces trimmed, and each file/folder name capped at `filename_max` (255; `filename_unit = "auto"`: characters on macOS, bytes on Linux).
 - `tv_show_year = true` adds `(YYYY)` to show names; `[matching] episode_title_from_filename` uses the filename's episode title when providers have none.
 - `image_base` should be the bare TMDB image root (`https://image.tmdb.org/t/p`); a trailing `/original` or `/wNNN` is stripped with a warning.
 
 ### Genres and grouping
 
+- Descriptions: the longest one wins (`[merge] longest`), Jack's fallback until Sammy picks.
 - Genres from every provider are merged, deduped, alphabetized and written as one string (`genre_case = "lower"`, `genre_separator = ","` under `[providers]`), e.g. `animation,comedy,family`.
-- `--grouping <text>` (or `grouping = "..."` in a sidecar/config) writes iTunes Grouping (MP4 ©grp, MKV GROUPING).
+- `--grouping <text>` (or `grouping = "..."` in config) writes iTunes Grouping (MP4 ©grp, MKV GROUPING).
 
 ### Sorting / renaming
 

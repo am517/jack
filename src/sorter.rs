@@ -9,14 +9,24 @@ use std::path::{Path, PathBuf};
 pub struct MergeCfg {
     pub default: Vec<String>,
     pub fields: BTreeMap<String, Vec<String>>,
+    /// Fields where the longest value wins (Jack's fallback until Sammy picks).
+    pub longest: Vec<String>,
 }
 
-/// For each field, the first provider (per its priority list, then any) with a value wins.
+/// For each field, the first provider (per its priority list, then any) with a value wins;
+/// `longest` fields take the longest value (ties: priority order).
 pub fn merge(results: &[(String, Meta)], cfg: &MergeCfg) -> Meta {
     let mut out = Meta::new();
     let keys: std::collections::BTreeSet<&String> = results.iter().flat_map(|(_, m)| m.keys()).collect();
     for k in keys {
         let order = cfg.fields.get(k).unwrap_or(&cfg.default);
+        if cfg.longest.contains(k) {
+            let ranked = order.iter().filter_map(|p| results.iter().find(|(n, _)| n == p)).chain(results.iter().filter(|(n, _)| !order.contains(n)));
+            if let Some(v) = ranked.filter_map(|(_, m)| m.get(k)).rev().max_by_key(|v| v.chars().count()) {
+                out.insert(k.clone(), v.clone());
+            }
+            continue;
+        }
         let by_prio = order.iter().find_map(|p| results.iter().find(|(n, _)| n == p).and_then(|(_, m)| m.get(k)));
         if let Some(v) = by_prio.or_else(|| results.iter().find_map(|(_, m)| m.get(k))) {
             out.insert(k.clone(), v.clone());
@@ -68,10 +78,21 @@ pub fn render(tpl: &str, m: &Meta, ext: &str, cfg: &SortCfg) -> String {
 pub struct NamingCfg {
     pub file_language: String,
     pub folder_language: String,
-    /// Max bytes per path component (UTF-8 safe; the extension is kept).
-    pub max_component_bytes: usize,
-    /// Max characters per file name (extension kept); 0 = no limit.
+    /// Longest file or folder name (extension kept); 0 = no limit.
     pub filename_max: usize,
+    /// Unit of filename_max: "chars", "bytes", or "auto" (chars on macOS, bytes elsewhere).
+    pub filename_unit: String,
+}
+
+impl NamingCfg {
+    /// True when filename_max counts UTF-8 bytes.
+    pub fn in_bytes(&self) -> bool {
+        match self.filename_unit.as_str() {
+            "chars" => false,
+            "bytes" => true,
+            _ => !cfg!(target_os = "macos"),
+        }
+    }
 }
 
 /// Names for `lang`: "original" swaps in original_* names where known; anything else (the primary
@@ -88,24 +109,24 @@ fn localized(m: &Meta, lang: &str) -> Meta {
     x
 }
 
-/// NFC, control chars -> replacement, no trailing dots/spaces, at most `max` bytes (cut at a char boundary,
-/// keeping `.ext` when `ext` is given), and at most `max_chars` characters when non-zero.
-pub fn safe_component(c: &str, ext: Option<&str>, cfg: &SortCfg, max: usize, max_chars: usize) -> String {
+/// NFC, control chars -> replacement, no trailing dots/spaces, at most `max` bytes (or characters when
+/// `!bytes`; 0 = no limit), cut at a char boundary keeping `.ext` when `ext` is given.
+pub fn safe_component(c: &str, ext: Option<&str>, cfg: &SortCfg, max: usize, bytes: bool) -> String {
     use unicode_normalization::UnicodeNormalization;
+    let len = |s: &str| if bytes { s.len() } else { s.chars().count() };
     let c: String = c.nfc().map(|ch| if ch.is_control() { cfg.replacement.clone() } else { ch.to_string() }).collect();
     let suffix = ext.filter(|e| !e.is_empty()).map(|e| format!(".{e}")).filter(|s| c.ends_with(s.as_str()));
     let mut stem = c[..c.len() - suffix.as_ref().map_or(0, |s| s.len())].to_string();
-    let keep = max_chars.saturating_sub(suffix.as_ref().map_or(0, |s| s.chars().count()));
-    if max_chars > 0 && stem.chars().count() > keep {
-        stem = stem.chars().take(keep).collect::<String>().trim_end_matches([' ', '-', '.']).to_string();
-    }
-    let budget = if max == 0 { usize::MAX } else { max.saturating_sub(suffix.as_ref().map_or(0, |s| s.len())) };
-    if stem.len() > budget {
-        let mut i = budget;
-        while !stem.is_char_boundary(i) {
-            i -= 1;
+    let budget = max.saturating_sub(suffix.as_deref().map_or(0, len));
+    if max > 0 && len(&stem) > budget {
+        let mut cut = String::new();
+        for ch in stem.chars() {
+            if len(&cut) + len(ch.encode_utf8(&mut [0; 4])) > budget {
+                break;
+            }
+            cut.push(ch);
         }
-        stem.truncate(i);
+        stem = cut.trim_end_matches([' ', '-', '.']).to_string();
     }
     let stem = stem.trim_end_matches(['.', ' ']);
     let out = format!("{stem}{}", suffix.unwrap_or_default());
@@ -138,9 +159,9 @@ pub fn destination(output: Option<&Path>, file: &Path, m: &Meta, cfg: &SortCfg, 
     let mut parts: Vec<&str> = folders.split('/').collect();
     parts.pop();
     for c in parts.iter().filter(|c| !c.is_empty()) {
-        p.push(safe_component(c, None, cfg, n.max_component_bytes, 0));
+        p.push(safe_component(c, None, cfg, n.filename_max, n.in_bytes()));
     }
-    p.push(safe_component(name.rsplit('/').next().unwrap_or(""), Some(&ext), cfg, n.max_component_bytes, n.filename_max));
+    p.push(safe_component(name.rsplit('/').next().unwrap_or(""), Some(&ext), cfg, n.filename_max, n.in_bytes()));
     p
 }
 
@@ -174,7 +195,11 @@ mod tests {
         ];
         let x = merge(&r, &cfg);
         assert_eq!(x["episode_title"], "B"); // thetvdb first for episode titles
-        assert_eq!(x["description"], "tm");
+        assert_eq!(x["description"], "tm"); // longest; tie -> priority
+        let mut r2 = r.clone();
+        r2[1].1.insert("description".into(), "the longer one".into());
+        assert_eq!(merge(&r2, &cfg)["description"], "the longer one");
+        assert_eq!(merge(&r2, &MergeCfg { longest: vec![], ..cfg.clone() })["description"], "tm");
         assert_eq!((x["genre"].as_str(), x["year"].as_str()), ("Comedy", "2016"));
     }
 
@@ -218,23 +243,25 @@ mod tests {
         no_orig.retain(|k, _| !k.starts_with("original"));
         assert!(destination(Some(Path::new("/o")), Path::new("a.mp4"), &no_orig, &cfg, &sw).starts_with("/o/TV/The Apothecary Diaries"));
         // NFC: decomposed e + combining acute -> é
-        assert_eq!(safe_component("Poke\u{301}mon\u{1}x. ", None, &cfg, 255, 0), "Pokémon-x");
+        assert_eq!(safe_component("Poke\u{301}mon\u{1}x. ", None, &cfg, 255, true), "Pokémon-x");
         let mv = m(&[("kind", "movie"), ("title", "Amélie: A/B? \"x\" <y>|z\\"), ("year", "2001")]);
         let d = destination(Some(Path::new("/o")), Path::new("a.mkv"), &mv, &cfg, &n);
         assert_eq!(d, PathBuf::from("/o/Movies/Amélie- A-B- -x- -y--z- (2001)/Amélie- A-B- -x- -y--z- (2001).mkv"));
-        // byte cap at a char boundary, extension kept
-        let s = safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20, 0);
+        // bytes: cut at a char boundary, extension kept
+        let s = safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20, true);
         assert_eq!(s, format!("{}.mp4", "薬".repeat(5)));
-        assert!(s.len() <= 20);
-        // filename_max (chars, extension kept, trailing space/dot trimmed); the byte cap still applies
-        assert_eq!(safe_component("Show S01E01 - A very long title.mkv", Some("mkv"), &cfg, 255, 18), "Show S01E01.mkv");
-        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20, 50), format!("{}.mp4", "薬".repeat(5)));
-        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 255, 14), format!("{}.mp4", "薬".repeat(10)));
-        // default cap (120) applies to sorted file names only, not folders
-        let long = m(&[("kind", "episode"), ("show", &"S".repeat(150)), ("season", "1"), ("episode", "1"), ("episode_title", &"T".repeat(200))]);
+        // chars (macOS): extension kept, trailing space/dash/dot trimmed
+        assert_eq!(safe_component("Show S01E01 - A very long title.mkv", Some("mkv"), &cfg, 18, false), "Show S01E01.mkv");
+        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(300)), Some("mp4"), &cfg, 255, false), format!("{}.mp4", "薬".repeat(251)));
+        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(300)), Some("mp4"), &cfg, 255, true), format!("{}.mp4", "薬".repeat(83)));
+        assert_eq!(safe_component("abc.mp4", Some("mp4"), &cfg, 0, true), "abc.mp4"); // 0 = no limit
+        // default: 255, chars on macOS, bytes elsewhere; files and folders
+        assert_eq!((n.filename_max, n.in_bytes()), (255, !cfg!(target_os = "macos")));
+        assert!(!NamingCfg { filename_unit: "chars".into(), ..n.clone() }.in_bytes() && NamingCfg { filename_unit: "bytes".into(), ..n.clone() }.in_bytes());
+        let long = m(&[("kind", "episode"), ("show", &"S".repeat(300)), ("season", "1"), ("episode", "1"), ("episode_title", "T")]);
         let d = destination(Some(Path::new("/o")), Path::new("a.mkv"), &long, &cfg, &n);
-        assert_eq!(d.file_name().unwrap().to_string_lossy().chars().count(), 120);
-        assert!(d.to_string_lossy().ends_with(".mkv") && d.parent().unwrap().parent().unwrap().file_name().unwrap().len() == 150);
+        assert!(d.file_name().unwrap().len() == 255 && d.to_string_lossy().ends_with(".mkv"));
+        assert_eq!(d.parent().unwrap().parent().unwrap().file_name().unwrap().len(), 255);
     }
 
     #[test]

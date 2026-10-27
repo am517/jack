@@ -1,4 +1,8 @@
-# Proposals for discussion (not implemented)
+# Proposals for discussion (answered 2026-10-27)
+
+Adam answered these on 2026-10-27. Decisions, the shared schema and the open questions now live in the
+main `windups` repo (WINDUPS.md, schema/, docs/, QUESTIONS.md). The text below is kept as history.
+Done in Jack: no sidecars, filename_max 255 (chars on macOS, bytes on Linux), longest description wins.
 
 These follow NEXT-SESSION.md. Each section ends with my recommendation and the questions I need answered before coding.
 

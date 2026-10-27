@@ -1,7 +1,6 @@
 # Jack settings. Copy to ~/.config/windups/jack/config.toml (or use --config <path>).
-# Per-file overrides go in "<filename>.config" next to the media file (same keys, plus
-# per-file values like name, year and grouping).
-# Priority: command-line flags > per-file file > this file.
+# Per-file values (name, year, ids, grouping) are flags. Jack never reads sidecar files.
+# Priority: command-line flags > this file.
 
 
 # ── Files ─────────────────────────────────────────────────────────
@@ -11,9 +10,6 @@ extensions = ["mp4", "m4v", "mkv", "mov", "avi"]
 
 # Look inside subfolders.
 recursive = true
-
-# Per-file settings file: "<filename><sidecar_suffix>".
-sidecar_suffix = ".config"
 
 # Where saved metadata goes with --download-only: "<filename><meta_suffix>".
 meta_suffix = ".meta.json"
@@ -64,7 +60,7 @@ short_description_max = 250
 # Download and embed art (replaces existing art).
 embed_artwork = true
 
-# Saved art: "<filename><poster_suffix>".
+# Art saved with --download-only: "<filename><poster_suffix>" (otherwise a temp file).
 poster_suffix = ".poster.jpg"
 
 # "poster" or "landscape".
@@ -217,6 +213,9 @@ base_url = "https://www.omdbapi.com/"
 # For each field, use the first database in its list that has a value.
 default = ["tmdb", "thetvdb", "omdb"]
 
+# Fields where the longest value wins instead (ties: the list order).
+longest = ["description"]
+
 [merge.fields]
 episode_title = ["thetvdb", "tmdb"]
 description = ["tmdb", "thetvdb", "omdb"]
@@ -265,11 +264,11 @@ episode_title_from_filename = true
 file_language = "original"
 folder_language = "en"
 
-# Longest file name, in characters (extension kept; 0 = no limit).
-filename_max = 120
+# Longest file or folder name (extension kept; 0 = no limit).
+filename_max = 255
 
-# Longest file or folder name, in bytes (most disks allow 255).
-max_component_bytes = 255
+# Unit for filename_max: "chars", "bytes", or "auto" (chars on macOS, bytes on Linux).
+filename_unit = "auto"
 
 
 [sort]
