@@ -1,93 +1,111 @@
-# Jack configuration. All tweakable behavior lives here, not in code.
-# Copy to ~/.config/windups/jack/config.toml (or pass --config <path>).
-# This file is also compiled in as the fallback defaults.
-# Per-file sidecar: "<filename>.config" beside the media file, same keys.
-# Precedence: CLI flags > sidecar > main config > these defaults.
+# Jack settings. Copy to ~/.config/windups/jack/config.toml (or use --config <path>).
+# Per-file overrides go in "<filename>.config" next to the media file (same keys, plus
+# per-file values like name, year and grouping).
+# Priority: command-line flags > per-file file > this file.
 
-# Media file extensions to scan for (case-insensitive, no dot).
+
+# ── Files ─────────────────────────────────────────────────────────
+
+# File types to look for.
 extensions = ["mp4", "m4v", "mkv", "mov", "avi"]
 
-# Recurse into subdirectories when given a directory.
+# Look inside subfolders.
 recursive = true
 
-# Suffix appended to a media filename to find its sidecar.
+# Per-file settings file: "<filename><sidecar_suffix>".
 sidecar_suffix = ".config"
 
-# Destination root for sorted files (phase 4).
-# output = "~/Movies/Sorted"
-
-# Show what would change instead of changing anything.
-# Media type: "auto" (guess from filename/ids), "tv" or "movie" (forces matcher and providers)
-type = "auto"
-dry_run = false
-download_only = false
-# Print composite metadata to stdout (no media changes unless combined with download_only)
-print = false
-# "text" (key: value) or "json"
-print_format = "text"
-# iTunes Grouping (MP4 ©grp / MKV GROUPING); usually set per file in a sidecar, e.g. grouping = "Studio Ghibli".
-# grouping = ""
-
-# Where --download-only saves fetched metadata ("<filename><meta_suffix>").
-# --from-file <path> reads it back; give a directory to use "<dir>/<filename><meta_suffix>".
+# Where saved metadata goes with --download-only: "<filename><meta_suffix>".
 meta_suffix = ".meta.json"
 
-# Search overrides (usually set per file in a sidecar, or with --name / --year).
-# name replaces the title guessed from the filename; year filters searches.
-# name = "Blade Runner"
-# year = "1982"
+# Sort files into this folder (see [sort]).
+# output = "~/Media"
+
+
+# ── Run ───────────────────────────────────────────────────────────
+
+# "auto", "tv" or "movie".
+type = "auto"
+
+# Show what would happen without changing anything.
+dry_run = false
+
+# Only save metadata and art next to the file; don't touch the file.
+download_only = false
+
+# Print the metadata instead of tagging.
+print = false
+
+# Print as "text" or "json".
+print_format = "text"
+
 
 [tagger]
-# MP4/M4V/MOV writer: "atomicparsley" (iTunes-style atoms, like iVI4) or "exiftool".
+
+# MP4 tag writer: "atomicparsley" or "exiftool".
 mp4_tool = "atomicparsley"
-# Tool paths (name on PATH or absolute path; ~ is expanded).
+
+# Tool names or paths.
 atomicparsley = "AtomicParsley"
 exiftool = "exiftool"
 mkvpropedit = "mkvpropedit"
-# Used to read MKV tags back (ids from earlier runs).
 mkvextract = "mkvextract"
+mkvmerge = "mkvmerge"
+
+# Which files each tool handles.
 mp4_extensions = ["mp4", "m4v", "mov"]
 mkv_extensions = ["mkv"]
-# Artwork (like iVI4): on every normal run the poster is downloaded and embedded
-# (MP4 covr atom, replacing any existing art; MKV attachment, replacing an existing one).
-embed_artwork = true
-# --ask-art: fetch the full image lists (TMDB /images for movie/series/season/episode in the primary +
-# original language and untagged; TheTVDB extended artworks; OMDb poster), download them into a folder
-# named after the media file, list them (provider, kind, language, size; stderr) and ask which to embed
-# (Enter = #1, s = skip; non-TTY uses #1). Order: style (+ fallback), [merge] provider preference,
-# language, resolution. The extra requests happen only with --ask-art.
-ask_art = false
-ask_art_max = 20
-# Open the folder (with this command) while asking. Unset: true on macOS, false elsewhere.
-# ask_art_open_folder = true
-ask_art_open_command = "open"
-# Keep the folder afterwards (always kept with -d).
-ask_art_keep = false
-# TV episodes: poster choice in order, falling back to the next ("season", "series").
-tv_poster = ["season", "series"]
-# Art orientation: "poster" or "landscape" (sidecar key art_style, flag --art).
-# Landscape: movies use a backdrop; TV episodes use tv_landscape in order.
-art_style = "poster"
-tv_landscape = ["still", "backdrop"]
-# Style order to try per chosen style (falls back when the first has no art).
-art_fallback = { poster = ["poster", "landscape"], landscape = ["landscape", "poster"] }
-# MKV cover attachment name (Matroska convention: cover.jpg).
-mkv_cover_name = "cover.jpg"
-# Used to list existing MKV attachments.
-mkvmerge = "mkvmerge"
-# AtomicParsley's short description is limited; longer text goes in the long description.
+
+# Longer descriptions also go in the long description.
 short_description_max = 250
 
-# Saved poster art: "<filename><poster_suffix>" (used by --download-only and embedding).
+# ── Artwork ──
+
+# Download and embed art (replaces existing art).
+embed_artwork = true
+
+# Saved art: "<filename><poster_suffix>".
 poster_suffix = ".poster.jpg"
 
-# Database ids are written into the file and read back on later runs (preferred over the
-# filename guess; flags/sidecar ids still win). Keys are metadata ids, values are tag names.
-# MP4: iTunes freeform atoms "----:<id_domain>:<name>" (written with AtomicParsley --rDNSatom;
-# exiftool can't write these, so with mp4_tool = "exiftool" ids are still written by AtomicParsley).
-id_domain = "com.apple.iTunes"
-# Also write OMDb "rated" (e.g. PG-13, TV-MA) as the iTunes content rating (iTunEXTC).
+# "poster" or "landscape".
+art_style = "poster"
+
+# What to try if a style has no art.
+art_fallback = { poster = ["poster", "landscape"], landscape = ["landscape", "poster"] }
+
+# TV posters, in order: "season", "series".
+tv_poster = ["season", "series"]
+
+# TV landscape art, in order: "still" (episode), "backdrop" (show).
+tv_landscape = ["still", "backdrop"]
+
+# Cover name inside MKV files.
+mkv_cover_name = "cover.jpg"
+
+# ── Choose art (--ask-art) ──
+
+# Download all available art, list it and ask which to use.
+ask_art = false
+
+# Most images to show.
+ask_art_max = 20
+
+# Open the image folder while asking (default: on for macOS only).
+# ask_art_open_folder = true
+ask_art_open_command = "open"
+
+# Keep the image folder afterwards.
+ask_art_keep = false
+
+# ── Extra tags ──
+
+# Write the content rating (e.g. PG-13) on MP4 files.
 mp4_content_rating = true
+
+# Namespace for the MP4 custom tags below.
+id_domain = "com.apple.iTunes"
+
+# Custom tags: metadata key = tag name. Database ids are read back on later runs.
 [tagger.mp4_id_tags]
 imdb_id = "IMDB_ID"
 tmdb_id = "TMDB_ID"
@@ -96,17 +114,15 @@ tmdb_series_id = "TMDB_SERIES_ID"
 tmdb_episode_id = "TMDB_EPISODE_ID"
 thetvdb_series_id = "TVDB_SERIES_ID"
 thetvdb_episode_id = "TVDB_EPISODE_ID"
-# OMDb extras (same mechanism; not read back as ids).
 rating_imdb = "IMDB_RATING"
 rating_rotten_tomatoes = "ROTTEN_TOMATOES"
 rating_metacritic = "METACRITIC"
 rated = "RATED"
 awards = "AWARDS"
-# Original-language names (keep_original).
 original_title = "ORIGINAL_TITLE"
 original_show = "ORIGINAL_SHOW"
 original_episode_title = "ORIGINAL_EPISODE_TITLE"
-# MKV: global simple tags, merged into the existing tags (others, incl. track tags, are kept).
+
 [tagger.mkv_id_tags]
 imdb_id = "IMDB"
 tmdb_id = "TMDB"
@@ -124,124 +140,155 @@ original_title = "ORIGINAL_TITLE"
 original_show = "ORIGINAL_SHOW"
 original_episode_title = "ORIGINAL_EPISODE_TITLE"
 
+
 [providers]
-# Providers to query, in order. (IMDb ids given with --imdb are resolved through TMDB.)
-# OMDb adds ratings (IMDb, Rotten Tomatoes, Metacritic), rated and awards; skipped with a warning without a key.
+
+# Databases to use, in order. OMDb adds ratings and is skipped without a key.
 order = ["tmdb", "thetvdb", "omdb"]
-# Primary display language (ISO 639-1): titles, show and episode names in tags, meta and file names.
-# TMDB uses [providers.tmdb] language; TheTVDB uses translations (language_codes maps to its codes).
+
+# Main language (2 letters).
 language = "en"
-# Also keep original-language names: original_title / original_show / original_episode_title
-# (MP4 freeform atoms / MKV tags below, meta.json, --print, template placeholders).
+
+# Also keep names in the original language.
 keep_original = true
-# Append " (year)" to TV show names.
+
+# Add " (year)" to TV show names.
 tv_show_year = false
-# Append "Original title: ..." to the description.
+
+# Add "Original title: ..." to the description.
 original_in_description = false
-# Genres from every provider, deduped and alphabetized: case "lower", "title" or "asis".
+
+# Genres: "lower", "title" or "asis" case, joined with genre_separator.
 genre_case = "lower"
 genre_separator = ","
+
+# 2-letter to 3-letter language codes (for TheTVDB).
 language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", it = "ita", pt = "por", ko = "kor", zh = "zho", ru = "rus", nl = "nld", sv = "swe" }
 
 [providers.tmdb]
-# Get one at https://www.themoviedb.org/settings/api. Set read_token (preferred) or api_key.
+
+# Key from https://www.themoviedb.org/settings/api (read_token or api_key).
 read_token = ""
 api_key = ""
-base_url = "https://api.themoviedb.org/3"
-# No size segment here (sizes are below); a trailing /original or /w780 is stripped with a warning.
-image_base = "https://image.tmdb.org/t/p"
-# Poster size: w92 w154 w185 w342 w500 w780 original.
-poster_size = "original"
-# Landscape art sizes: backdrops w300 w780 w1280 original; episode stills w92 w185 w300 original.
-backdrop_size = "original"
-still_size = "original"
-# Preferred backdrop language (backdrops with the title); falls back to textless (null).
-image_language = "en"
+
 language = "en-US"
 
+# Preferred language for backdrops.
+image_language = "en"
+
+# Sizes: w92 … w780 or "original" (backdrops w300 w780 w1280; stills w92 w185 w300).
+poster_size = "original"
+backdrop_size = "original"
+still_size = "original"
+
+base_url = "https://api.themoviedb.org/3"
+image_base = "https://image.tmdb.org/t/p"
+
 [providers.thetvdb]
-# Get one at https://thetvdb.com/api-information. pin only if your key is a user-supported key.
+
+# Key from https://thetvdb.com/api-information (pin only if your key needs one).
 api_key = ""
 pin = ""
-base_url = "https://api4.thetvdb.com/v4"
-# Poster size: "full" or "thumbnail".
-poster_size = "full"
-# Preferred background-art language; falls back to untagged.
-image_language = "eng"
-# Translation language (e.g. "eng"); empty: [providers] language via language_codes.
+
+# 3-letter language; empty uses [providers] language.
 language = ""
 
+# Preferred language for background art.
+image_language = "eng"
+
+# "full" or "thumbnail".
+poster_size = "full"
+
+base_url = "https://api4.thetvdb.com/v4"
+
 [providers.omdb]
-# Get one at https://www.omdbapi.com/apikey.aspx.
+
+# Key from https://www.omdbapi.com/apikey.aspx.
 api_key = ""
-base_url = "https://www.omdbapi.com/"
+
+# "short" or "full".
 plot = "short"
 
+base_url = "https://www.omdbapi.com/"
+
+
 [merge]
-# Composite metadata: for each field, take the first provider in its list that has a value.
+
+# For each field, use the first database in its list that has a value.
 default = ["tmdb", "thetvdb", "omdb"]
+
 [merge.fields]
 episode_title = ["thetvdb", "tmdb"]
 description = ["tmdb", "thetvdb", "omdb"]
-# Artwork source preference (first provider with art wins).
 poster_url = ["tmdb", "thetvdb", "omdb"]
 season_poster_url = ["tmdb", "thetvdb"]
 backdrop_url = ["tmdb", "thetvdb"]
 still_url = ["tmdb", "thetvdb"]
-# OMDb is the source for ratings, rated and awards; a fallback for plot/poster.
 rating_imdb = ["omdb"]
 rating_rotten_tomatoes = ["omdb"]
 rating_metacritic = ["omdb"]
 rated = ["omdb"]
 awards = ["omdb"]
 
+
 [matching]
-# Filename -> title. Applied to the file stem in order: separators become spaces,
-# then TV patterns (named groups show/season/episode), then movie patterns (title/year).
+
+# How titles are read from file names (regular expressions).
 separators = '[._]+'
+
 tv_patterns = [
   '(?i)^(?P<show>.*?)[ \-]*S(?P<season>\d{1,2})[ \-]*E(?P<episode>\d{1,3})',
   '(?i)^(?P<show>.*?)[ \-]*(?P<season>\d{1,2})x(?P<episode>\d{2,3})\b',
 ]
+
 movie_patterns = [
   '^(?P<title>.+)[ \-]*[(\[](?P<year>(?:19|20)\d{2})[)\]]',
   '^(?P<title>.+?)[ \-]*[(\[]?(?P<year>(?:19|20)\d{2})[)\]]?(?:\s|$)',
 ]
-# Removed from titles (case-insensitive), e.g. release junk.
+
+# Removed from titles (release tags etc.).
 cleanup = [
   '(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|bluray|blu-ray|brrip|web-?dl|webrip|hdtv|dvdrip|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|dts|remux|proper|repack)\b.*$',
   '\[[^\]]*\]',
 ]
-# If a TV filename has no show name, use the parent folder name.
+
+# No show name in a TV file name: use the folder name.
 show_from_parent_dir = true
-# Last resort: episode title from the filename (text after SxxExx, before release junk).
+
+# No episode title found: use the text after SxxExx in the file name.
 episode_title_from_filename = true
 
+
 [naming]
-# Languages for sorted names: "original" (original-language names, when known) or a language code.
-# The [providers] language code gives the primary names; other codes fall back to them (not fetched).
-# A missing name falls back to the other language. Tag language is [providers] language.
+
+# Language for file and folder names: "original" or a 2-letter code.
 file_language = "original"
 folder_language = "en"
-# Max bytes per file/folder name (UTF-8 safe; names are NFC-normalized, control chars replaced).
+
+# Longest file name, in characters (extension kept; 0 = no limit).
+filename_max = 120
+
+# Longest file or folder name, in bytes (most disks allow 255).
 max_component_bytes = 255
 
+
 [sort]
-# Files are moved/copied ONLY when sorting is on: --output/-o (or `output` above), or enabled = true.
-# Without either, jack only tags in place (the default). --dry-run prints the target without moving.
+
+# Files are moved ONLY with -o / output, or when this is true.
 enabled = false
-# Roots for a leading {tv_root} / {movie_root} (~ expanded). -o replaces both.
-tv_root = "~/TV"
-movie_root = "~/Movies"
-# Placeholders: {title} {year} {show} {season} {episode} {episode_title} {original_title} {original_show}
-# {original_episode_title} {ext} (any metadata key); {season:02} zero-pads. Empty " - {x}" parts are dropped.
-# {show} {title} {episode_title} follow [naming] (folder_language in folders, file_language in the file name);
-# {show_en} {title_en} {episode_title_en}: primary [providers] language; {*_file} / {*_folder}: per
-# file_language / folder_language anywhere. {show_year}: the show's first-aired year.
-movie_template = "{movie_root}/{title_en}/{title_file} ({year}).{ext}"
-tv_template = "{tv_root}/{show_en} ({show_year})/Season {season}/{show_file} S{season:02}E{episode:02} - {episode_title_file}.{ext}"
+
 # "move" or "copy".
 mode = "move"
-# Characters not allowed in file names, and what replaces them.
+
+# Top folders (-o replaces both).
+tv_root = "~/TV"
+movie_root = "~/Movies"
+
+# Names. Use any metadata key in {}: {title} {year} {show} {season} {episode} {episode_title} {ext} …
+# _en = main language, _file / _folder = [naming] languages. {season:02} pads to 2 digits.
+movie_template = "{movie_root}/{title_en}/{title_file} ({year}).{ext}"
+tv_template = "{tv_root}/{show_en} ({show_year})/Season {season}/{show_file} S{season:02}E{episode:02} - {episode_title_file}.{ext}"
+
+# Characters not allowed in names, and their replacement.
 illegal_chars = '/\:*?"<>|'
 replacement = "-"

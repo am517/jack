@@ -811,7 +811,7 @@ mod tests {
         assert!(o.contains("tagger.art_style: \"poster\" -> \"landscape\"") && o.contains("output: (unset) -> \"/out\""), "{o}");
         assert!(!o.contains("media file"), "save-only must not run: {o}");
         let t = fs::read_to_string(&c).unwrap();
-        assert!(t.contains("# Art orientation: \"poster\" or \"landscape\"") && t.contains("art_style = \"landscape\""));
+        assert!(t.contains("# \"poster\" or \"landscape\".") && t.contains("art_style = \"landscape\""));
         assert!(t.contains("order = [\"tmdb\", \"omdb\"]") && !t.contains("tt1"));
         let cfg = config::load(Some(&c)).unwrap();
         assert_eq!((cfg.tagger.mp4_tool.as_str(), cfg.base.output.as_deref()), ("exiftool", Some(Path::new("/out"))));

@@ -70,6 +70,8 @@ pub struct NamingCfg {
     pub folder_language: String,
     /// Max bytes per path component (UTF-8 safe; the extension is kept).
     pub max_component_bytes: usize,
+    /// Max characters per file name (extension kept); 0 = no limit.
+    pub filename_max: usize,
 }
 
 /// Names for `lang`: "original" swaps in original_* names where known; anything else (the primary
@@ -87,12 +89,16 @@ fn localized(m: &Meta, lang: &str) -> Meta {
 }
 
 /// NFC, control chars -> replacement, no trailing dots/spaces, at most `max` bytes (cut at a char boundary,
-/// keeping `.ext` when `ext` is given).
-pub fn safe_component(c: &str, ext: Option<&str>, cfg: &SortCfg, max: usize) -> String {
+/// keeping `.ext` when `ext` is given), and at most `max_chars` characters when non-zero.
+pub fn safe_component(c: &str, ext: Option<&str>, cfg: &SortCfg, max: usize, max_chars: usize) -> String {
     use unicode_normalization::UnicodeNormalization;
     let c: String = c.nfc().map(|ch| if ch.is_control() { cfg.replacement.clone() } else { ch.to_string() }).collect();
     let suffix = ext.filter(|e| !e.is_empty()).map(|e| format!(".{e}")).filter(|s| c.ends_with(s.as_str()));
     let mut stem = c[..c.len() - suffix.as_ref().map_or(0, |s| s.len())].to_string();
+    let keep = max_chars.saturating_sub(suffix.as_ref().map_or(0, |s| s.chars().count()));
+    if max_chars > 0 && stem.chars().count() > keep {
+        stem = stem.chars().take(keep).collect::<String>().trim_end_matches([' ', '-', '.']).to_string();
+    }
     let budget = if max == 0 { usize::MAX } else { max.saturating_sub(suffix.as_ref().map_or(0, |s| s.len())) };
     if stem.len() > budget {
         let mut i = budget;
@@ -132,9 +138,9 @@ pub fn destination(output: Option<&Path>, file: &Path, m: &Meta, cfg: &SortCfg, 
     let mut parts: Vec<&str> = folders.split('/').collect();
     parts.pop();
     for c in parts.iter().filter(|c| !c.is_empty()) {
-        p.push(safe_component(c, None, cfg, n.max_component_bytes));
+        p.push(safe_component(c, None, cfg, n.max_component_bytes, 0));
     }
-    p.push(safe_component(name.rsplit('/').next().unwrap_or(""), Some(&ext), cfg, n.max_component_bytes));
+    p.push(safe_component(name.rsplit('/').next().unwrap_or(""), Some(&ext), cfg, n.max_component_bytes, n.filename_max));
     p
 }
 
@@ -212,14 +218,23 @@ mod tests {
         no_orig.retain(|k, _| !k.starts_with("original"));
         assert!(destination(Some(Path::new("/o")), Path::new("a.mp4"), &no_orig, &cfg, &sw).starts_with("/o/TV/The Apothecary Diaries"));
         // NFC: decomposed e + combining acute -> é
-        assert_eq!(safe_component("Poke\u{301}mon\u{1}x. ", None, &cfg, 255), "Pokémon-x");
+        assert_eq!(safe_component("Poke\u{301}mon\u{1}x. ", None, &cfg, 255, 0), "Pokémon-x");
         let mv = m(&[("kind", "movie"), ("title", "Amélie: A/B? \"x\" <y>|z\\"), ("year", "2001")]);
         let d = destination(Some(Path::new("/o")), Path::new("a.mkv"), &mv, &cfg, &n);
         assert_eq!(d, PathBuf::from("/o/Movies/Amélie- A-B- -x- -y--z- (2001)/Amélie- A-B- -x- -y--z- (2001).mkv"));
         // byte cap at a char boundary, extension kept
-        let s = safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20);
+        let s = safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20, 0);
         assert_eq!(s, format!("{}.mp4", "薬".repeat(5)));
         assert!(s.len() <= 20);
+        // filename_max (chars, extension kept, trailing space/dot trimmed); the byte cap still applies
+        assert_eq!(safe_component("Show S01E01 - A very long title.mkv", Some("mkv"), &cfg, 255, 18), "Show S01E01.mkv");
+        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 20, 50), format!("{}.mp4", "薬".repeat(5)));
+        assert_eq!(safe_component(&format!("{}.mp4", "薬".repeat(100)), Some("mp4"), &cfg, 255, 14), format!("{}.mp4", "薬".repeat(10)));
+        // default cap (120) applies to sorted file names only, not folders
+        let long = m(&[("kind", "episode"), ("show", &"S".repeat(150)), ("season", "1"), ("episode", "1"), ("episode_title", &"T".repeat(200))]);
+        let d = destination(Some(Path::new("/o")), Path::new("a.mkv"), &long, &cfg, &n);
+        assert_eq!(d.file_name().unwrap().to_string_lossy().chars().count(), 120);
+        assert!(d.to_string_lossy().ends_with(".mkv") && d.parent().unwrap().parent().unwrap().file_name().unwrap().len() == 150);
     }
 
     #[test]
