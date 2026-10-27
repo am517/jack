@@ -10,8 +10,8 @@ Status: phases 1-4 done: CLI, config + sidecar, scan, tag writing, TMDB/TheTVDB 
 ## Install
 
 ```zsh
-brew install am517/tap/jack
-mkdir -p ~/.config/windups/jack && cp "$(brew --prefix)/share/jack/config.toml.example" ~/.config/windups/jack/config.toml
+brew install am517/tap/windups-jack
+mkdir -p ~/.config/windups/jack && cp "$(brew --prefix)/share/windups-jack/config.toml.example" ~/.config/windups/jack/config.toml
 ```
 
 ## Build from source (macOS, zsh)
