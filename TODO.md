@@ -5,7 +5,7 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 ## Now: Jack + this repo, until both are satisfactory
 - [x] WINDUPS.md standard (draft 1), shared settings, schema v1 draft with example searches
 - [x] Jack: no sidecars, filename_max 255 (chars on macOS, bytes on Linux), longest description fallback
-- [ ] Adam reviews schema v1 and the communication proposal (QUESTIONS.md)
+- [x] Adam reviewed schema v1 and communication proposal (2026-10-28)
 - [x] Shared `windups` crate: settings, paths, open/migrate media.db (user_version), raw pruning
 - [ ] Jack writes everything it fetches into media.db (candidates, all art, texts, entities, genres), then tags from it
 - [ ] Jack: new free sources in order: Wikidata (groupings, cross-ids), TVmaze, iTunes art, YouTube trailers; Wikipedia text as a description fallback
