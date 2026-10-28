@@ -1,0 +1,61 @@
+//! Open media.db and bring its schema up to date.
+use rusqlite::Connection;
+use std::path::Path;
+
+/// Ordered migrations; index + 1 is the schema version (PRAGMA user_version).
+const MIGRATIONS: &[&str] = &[include_str!("../schema/media.sql")];
+
+pub fn latest_version() -> i64 {
+    MIGRATIONS.len() as i64
+}
+
+/// Open (creating folders and file if needed) and migrate.
+pub fn open(path: &Path) -> Result<Connection, String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let mut conn = Connection::open(path).map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+        .map_err(|e| e.to_string())?;
+    migrate(&mut conn)?;
+    Ok(conn)
+}
+
+pub fn version(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(|e| e.to_string())
+}
+
+pub fn migrate(conn: &mut Connection) -> Result<(), String> {
+    let current = version(conn)?;
+    if current > latest_version() {
+        return Err(format!("media.db is version {current}, newer than this windup knows ({}); please update", latest_version()));
+    }
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute_batch(sql).map_err(|e| format!("migration {}: {e}", i + 1))?;
+        tx.pragma_update(None, "user_version", (i + 1) as i64).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn creates_and_migrates() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sub/media.db");
+        let c = open(&p).unwrap();
+        assert_eq!(version(&c).unwrap(), latest_version());
+        let n: i64 = c.query_row("SELECT count(*) FROM sqlite_master WHERE name='media'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+    #[test]
+    fn reopen_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("media.db");
+        drop(open(&p).unwrap());
+        assert_eq!(version(&open(&p).unwrap()).unwrap(), latest_version());
+    }
+}

@@ -62,3 +62,7 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 - Rust 2024, `cargo test` and `cargo clippy --all-targets -- -D warnings` clean before every commit.
 - Tests use fakes for the network; integration tests skip when external tools are missing.
 - macOS first, Linux supported, Windows not a goal. File/folder names max 255 (characters on macOS, bytes on Linux).
+
+## Design rules (Adam, 2026-10-28)
+- **Treat each windup like a person.** When the right behavior is unclear, ask what a person would do. Example: with no database reachable, Jack writes a JSON next to the media (like jotting a note) — the one allowed exception to "no sidecars", and it is imported into media.db once available.
+- **Modular.** One file does one thing (within reason); small focused modules.

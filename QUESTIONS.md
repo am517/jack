@@ -17,3 +17,8 @@
 
 ## Order
 9. Next windup after Jack: Lauren (as in TODO.md) or Daniel/Sammy first?
+
+## Resolved by the person rule (2026-10-28)
+- 5: Yes — a person who needs something written down writes it themselves. Jack writes media.db via the shared crate; with no DB, a JSON next to the media.
+- 6: The shared crate owns migrations (one rulebook everyone reads). Daniel can call it later.
+- 2: Raw responses in `raw_json` on each row (a person keeps the receipt with the item); large binaries (art) as files under raw_dir.
