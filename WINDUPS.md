@@ -14,7 +14,7 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 | Steve | finds local information in the database (search) | later |
 | Sally | organizes files (rename, move, sort) | later |
 | Tammy | super windup: ingests new media by orchestrating the others | later |
-| Oliver | introducer/matchmaker between windups | much later |
+| Oliver | manager/matchmaker: breaks down messy requests, decides which windups team up, spots gaps needing a new windup (revisit once Margaret exists; fold in if redundant) | much later |
 | Margaret | receptionist/directory: knows every windup and its capabilities, points callers to the right one (until needed, PATH + `--capabilities` is enough) | later |
 
 ## Rules
