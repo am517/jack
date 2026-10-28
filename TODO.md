@@ -21,4 +21,5 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 5. **Sally**: organizes files (takes over Jack's built-in sorting; Jack keeps a fallback)
 6. **Tammy**: super windup; ingests new media by orchestrating the others
 7. **Oliver**: introducer/matchmaker (much later)
+8. **Margaret**: receptionist/directory of windups and capabilities (later, once there are too many to know personally)
 - Update windup (files and database together), name TBD

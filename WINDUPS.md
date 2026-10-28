@@ -15,6 +15,7 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 | Sally | organizes files (rename, move, sort) | later |
 | Tammy | super windup: ingests new media by orchestrating the others | later |
 | Oliver | introducer/matchmaker between windups | much later |
+| Margaret | receptionist/directory: knows every windup and its capabilities, points callers to the right one (until needed, PATH + `--capabilities` is enough) | later |
 
 ## Rules
 
@@ -66,3 +67,5 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 ## Design rules (Adam, 2026-10-28)
 - **Treat each windup like a person.** When the right behavior is unclear, ask what a person would do. Example: with no database reachable, Jack writes a JSON next to the media (like jotting a note) — the one allowed exception to "no sidecars", and it is imported into media.db once available.
 - **Modular.** One file does one thing (within reason); small focused modules.
+
+Naming: traditional American English names for now (Adam, 2026-10-28).
