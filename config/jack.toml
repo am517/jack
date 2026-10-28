@@ -185,6 +185,9 @@ image_base = "https://image.tmdb.org/t/p"
 
 # Key from https://thetvdb.com/api-information (pin only if your key needs one).
 api_key = ""
+
+# When api_key is empty, read the key from this environment variable. Empty = off.
+api_key_env = "THETVDB_API_KEY"
 pin = ""
 
 # 3-letter language; empty uses [providers] language.

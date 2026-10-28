@@ -118,6 +118,8 @@ pub struct TvdbCfg {
     /// "full" or "thumbnail" (TheTVDB's "_t" variant).
     pub poster_size: String,
     pub api_key: String,
+    /// Env var read when api_key is empty (e.g. THETVDB_API_KEY).
+    pub api_key_env: String,
     pub pin: String,
     pub base_url: String,
     /// Translation language (ISO 639-2, e.g. "eng"); empty: from [providers] language via language_codes.

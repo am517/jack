@@ -10,6 +10,13 @@ pub const EMBED_TMDB_TOKEN: Option<&str> = option_env!("JACK_TMDB_TOKEN");
 pub const EMBED_TVDB_KEY: Option<&str> = option_env!("JACK_TVDB_KEY");
 pub const EMBED_OMDB_KEY: Option<&str> = option_env!("JACK_OMDB_KEY");
 
+/// Fill an empty TheTVDB key from the env var named in config (config value > env var > embedded key).
+pub fn apply_env(p: &mut crate::providers::ProvidersCfg, get: impl Fn(&str) -> Option<String>) {
+    if p.thetvdb.api_key.is_empty() && !p.thetvdb.api_key_env.is_empty() {
+        p.thetvdb.api_key = get(&p.thetvdb.api_key_env).unwrap_or_default();
+    }
+}
+
 /// Fill empty provider keys from embedded build-time keys (config file value > embedded key).
 pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>, tvdb: Option<&str>, omdb: Option<&str>) {
     if p.omdb.api_key.is_empty() {
@@ -200,6 +207,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
         c.store.enabled = false;
     }
     expand_s(&mut c.store.database);
+    apply_env(&mut c.providers, |n| std::env::var(n).ok().filter(|v| !v.is_empty()));
     apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY, EMBED_OMDB_KEY);
     Ok(c)
 }
@@ -239,5 +247,16 @@ mod tests {
         p.tmdb.api_key = "v3".into();
         apply_embedded(&mut p, Some("emb-tmdb"), None, None);
         assert_eq!((p.tmdb.read_token.as_str(), p.thetvdb.api_key.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn tvdb_key_from_named_env_var_unless_config_has_one() {
+        let mut p = crate::providers::ProvidersCfg::default();
+        p.thetvdb.api_key_env = "TVDB_ENV".into();
+        apply_env(&mut p, |n| (n == "TVDB_ENV").then(|| "from-env".to_string()));
+        assert_eq!(p.thetvdb.api_key, "from-env");
+        p.thetvdb.api_key = "from-config".into();
+        apply_env(&mut p, |_| Some("other".into()));
+        assert_eq!(p.thetvdb.api_key, "from-config");
     }
 }
