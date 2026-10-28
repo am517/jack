@@ -140,7 +140,8 @@ original_episode_title = "ORIGINAL_EPISODE_TITLE"
 [providers]
 
 # Databases to use, in order. OMDb adds ratings and is skipped without a key.
-order = ["tmdb", "thetvdb", "omdb"]
+# wikidata, tvmaze, itunes and youtube run after the others and reuse the ids they found.
+order = ["tmdb", "thetvdb", "omdb", "wikidata", "tvmaze", "itunes", "youtube"]
 
 # Main language (2 letters).
 language = "en"
@@ -206,6 +207,39 @@ api_key = ""
 plot = "short"
 
 base_url = "https://www.omdbapi.com/"
+
+[providers.wikidata]
+
+# Cross-ids, franchise and series groupings. Looked up only by a known id.
+base_url = "https://www.wikidata.org/w/api.php"
+language = "en"
+
+[providers.wikipedia]
+
+# Article summary, used only when no provider gave a description.
+enabled = true
+base_url = "https://en.wikipedia.org/api/rest_v1"
+
+[providers.tvmaze]
+
+# Free TV data, no key.
+base_url = "https://api.tvmaze.com"
+
+[providers.itunes]
+
+# iTunes Search API, no key: high-resolution art.
+base_url = "https://itunes.apple.com/search"
+country = "US"
+art_size = "3000x3000bb"
+limit = 5
+
+[providers.youtube]
+
+# Trailer link. Key from https://console.cloud.google.com (YouTube Data API v3). Empty = skipped.
+api_key = ""
+base_url = "https://www.googleapis.com/youtube/v3"
+search_suffix = "trailer"
+watch_url = "https://www.youtube.com/watch?v="
 
 
 [merge]

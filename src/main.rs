@@ -14,6 +14,7 @@ mod secrets;
 mod setcfg;
 mod setflags;
 mod sorter;
+mod sources;
 mod store;
 mod tagger;
 #[cfg(test)]
