@@ -29,7 +29,10 @@ fn text(v: &Value) -> Option<String> {
 /// "Doctor Who (2005)" -> ("Doctor Who", Some("2005")); TVmaze finds nothing with the suffix.
 fn split_year(t: &str) -> (String, Option<String>) {
     let base = crate::providers::strip_year_suffix(t);
-    let y = t[base.len()..].chars().filter(char::is_ascii_digit).collect::<String>();
+    let y = t[base.len()..]
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
     (base, (y.len() == 4).then_some(y))
 }
 
@@ -43,10 +46,25 @@ impl Tvmaze<'_> {
                 // title search: prefer the show that premiered in the query year (Doctor Who 1963 vs 2005)
                 let (title, year) = split_year(&q.title);
                 let qy = q.year.clone().or(year);
-                let r = self.http.get(&format!("{b}/search/shows?q={}", enc(&title)), &[])?;
-                let hits: Vec<&Value> = r.as_array().into_iter().flatten().map(|h| &h["show"]).collect();
-                let year = |h: &&&Value| qy.as_deref().is_some_and(|y| s(&h["premiered"]).is_some_and(|d| d.starts_with(y)));
-                return Ok(hits.iter().find(year).or(hits.first()).map(|h| (*h).clone()).unwrap_or(Value::Null));
+                let r = self
+                    .http
+                    .get(&format!("{b}/search/shows?q={}", enc(&title)), &[])?;
+                let hits: Vec<&Value> = r
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|h| &h["show"])
+                    .collect();
+                let year = |h: &&&Value| {
+                    qy.as_deref()
+                        .is_some_and(|y| s(&h["premiered"]).is_some_and(|d| d.starts_with(y)))
+                };
+                return Ok(hits
+                    .iter()
+                    .find(year)
+                    .or(hits.first())
+                    .map(|h| (*h).clone())
+                    .unwrap_or(Value::Null));
             }
         };
         self.http.get(&url, &[])
@@ -99,8 +117,22 @@ impl Provider for Tvmaze<'_> {
                 put(&mut m, "episode_title", s(&e["name"]));
                 put(&mut m, "still_url", s(&e["image"]["original"]));
                 put(&mut m, "description", text(&e["summary"]));
+                crate::providers::put_rating(
+                    &mut m,
+                    "tvmaze",
+                    &e["rating"]["average"],
+                    &Value::Null,
+                );
             }
-            _ => put(&mut m, "description", text(&sh["summary"])),
+            _ => {
+                put(&mut m, "description", text(&sh["summary"]));
+                crate::providers::put_rating(
+                    &mut m,
+                    "tvmaze",
+                    &sh["rating"]["average"],
+                    &Value::Null,
+                );
+            }
         }
         Ok(Some(m))
     }
@@ -121,7 +153,7 @@ mod tests {
             ),
             (
                 "/shows/82/episodebynumber?season=1&number=2",
-                json!({"id":900,"name":"Ep 2","summary":"<p><b>Psychic</b> trouble.</p>","image":{"original":"http://i/s.jpg"}}),
+                json!({"id":900,"name":"Ep 2","summary":"<p><b>Psychic</b> trouble.</p>","rating":{"average":7.5},"image":{"original":"http://i/s.jpg"}}),
             ),
         ]);
         let t = Tvmaze {
@@ -167,12 +199,32 @@ mod tests {
     #[test]
     fn title_search_prefers_query_year() {
         let h = FakeHttp::new(vec![
-            ("/search/shows?q=Doctor%20Who", json!([{"show":{"id":766,"name":"Doctor Who","premiered":"1963-11-23"}},{"show":{"id":210,"name":"Doctor Who","premiered":"2005-03-26"}}])),
-            ("/shows/210/episodebynumber", json!({"id":13857,"name":"Rose"})),
+            (
+                "/search/shows?q=Doctor%20Who",
+                json!([{"show":{"id":766,"name":"Doctor Who","premiered":"1963-11-23"}},{"show":{"id":210,"name":"Doctor Who","premiered":"2005-03-26"}}]),
+            ),
+            (
+                "/shows/210/episodebynumber",
+                json!({"id":13857,"name":"Rose"}),
+            ),
         ]);
-        let t = Tvmaze { cfg: TvmazeCfg { base_url: "http://tm".into() }, http: &h };
-        let q = Query { title: "Doctor Who (2005)".into(), season: Some(1), episode: Some(1), kind: Some("tv".into()), ..Default::default() };
+        let t = Tvmaze {
+            cfg: TvmazeCfg {
+                base_url: "http://tm".into(),
+            },
+            http: &h,
+        };
+        let q = Query {
+            title: "Doctor Who (2005)".into(),
+            season: Some(1),
+            episode: Some(1),
+            kind: Some("tv".into()),
+            ..Default::default()
+        };
         let m = t.lookup(&q).unwrap().unwrap();
-        assert_eq!((m["tvmaze_id"].as_str(), m["episode_title"].as_str()), ("210", "Rose"));
+        assert_eq!(
+            (m["tvmaze_id"].as_str(), m["episode_title"].as_str()),
+            ("210", "Rose")
+        );
     }
 }

@@ -210,6 +210,9 @@ base_url = "https://api4.thetvdb.com/v4"
 # Key from https://www.omdbapi.com/apikey.aspx.
 api_key = ""
 
+# When api_key is empty, read the key from this environment variable. Empty = off.
+api_key_env = "OMDB_API_KEY"
+
 # "short" or "full".
 plot = "short"
 

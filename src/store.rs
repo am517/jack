@@ -14,6 +14,20 @@ pub struct StoreCfg {
     pub busy_timeout_secs: u64,
 }
 
+/// rating_<source> meta keys stored in ratings.
+const RATINGS: [&str; 5] = ["imdb", "rotten_tomatoes", "metacritic", "tmdb", "tvmaze"];
+
+/// "6.3/10" -> (6.3, 10), "36%" -> (36, 100), "8.4" -> (8.4, 10).
+fn rating(v: &str) -> Option<(f64, f64)> {
+    let v = v.trim();
+    let (val, scale) = match (v.strip_suffix('%'), v.split_once('/')) {
+        (Some(p), _) => (p, "100"),
+        (_, Some((a, b))) => (a, b),
+        _ => (v, "10"),
+    };
+    Some((val.trim().parse().ok()?, scale.trim().parse().ok()?))
+}
+
 /// Meta key -> groups.kind.
 const GROUPS: [(&str, &str); 2] = [("franchise", "franchise"), ("series_group", "collection")];
 /// Meta key -> art kind.
@@ -100,6 +114,17 @@ pub fn record(
         tx.execute("INSERT OR IGNORE INTO genres(name) VALUES (?1)", [g])?;
         tx.execute("INSERT OR IGNORE INTO media_genres(media_id, genre_id, source) SELECT ?1, id, 'merged' FROM genres WHERE name = ?2", params![id, g])?;
     }
+    for src in RATINGS {
+        if let Some((value, scale)) = meta.get(&format!("rating_{src}")).and_then(|v| rating(v)) {
+            let votes = meta
+                .get(&format!("rating_{src}_votes"))
+                .and_then(|v| v.parse::<i64>().ok());
+            tx.execute(
+                "INSERT OR REPLACE INTO ratings(media_id, source, value, scale, votes, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                params![id, src, value, scale, votes],
+            )?;
+        }
+    }
     for (k, kind) in GROUPS {
         if let Some(n) = meta.get(k) {
             tx.execute(
@@ -166,7 +191,7 @@ fn upsert_media(
     ];
     if let Some(id) = existing {
         tx.execute("DELETE FROM media WHERE canonical_id = ?1", [id])?;
-        for t in ["texts", "art", "media_genres", "media_groups"] {
+        for t in ["texts", "art", "media_genres", "media_groups", "ratings"] {
             tx.execute(&format!("DELETE FROM {t} WHERE media_id = ?1"), [id])?;
         }
         tx.execute("UPDATE media SET kind=?1, title=?2, original_title=?3, year=?4, season=?5, episode=?6, rated=?7, status=?8, canonical_id=?9, source=?10, raw_json=?11, fetched_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id = ?12", rusqlite::params_from_iter(vals.iter().copied().chain([&id as &dyn rusqlite::ToSql])))?;
@@ -211,6 +236,15 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
     }
+    #[test]
+    fn rating_formats() {
+        assert_eq!(rating("6.3/10"), Some((6.3, 10.0)));
+        assert_eq!(rating("36%"), Some((36.0, 100.0)));
+        assert_eq!(rating("41/100"), Some((41.0, 100.0)));
+        assert_eq!(rating("8.4"), Some((8.4, 10.0)));
+        assert_eq!(rating("N/A"), None);
+    }
+
     fn count(c: &Connection, sql: &str) -> i64 {
         c.query_row(sql, [], |r| r.get(0)).unwrap()
     }
@@ -230,6 +264,10 @@ mod tests {
             ("tmdb_id", "603"),
             ("wikidata_id", "Q83495"),
             ("franchise", "The Matrix"),
+            ("rating_imdb", "8.7/10"),
+            ("rating_imdb_votes", "2100000"),
+            ("rating_rotten_tomatoes", "83%"),
+            ("rating_tmdb", "8.2"),
         ]);
         let found = vec![
             (
@@ -280,6 +318,21 @@ mod tests {
         assert_eq!(count(&c, "SELECT count(*) FROM media"), 3);
         assert_eq!(count(&c, "SELECT count(*) FROM art"), 2);
         assert_eq!(count(&c, "SELECT count(*) FROM files"), 1);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM ratings WHERE source = 'rotten_tomatoes' AND value = 83 AND scale = 100"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT votes FROM ratings WHERE source = 'imdb' AND value = 8.7 AND scale = 10"
+            ),
+            2100000
+        );
+        assert_eq!(count(&c, "SELECT count(*) FROM ratings"), 3);
         assert_eq!(count(&c, "SELECT count(*) FROM media_groups"), 1);
     }
 

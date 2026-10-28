@@ -135,6 +135,8 @@ pub struct TvdbCfg {
 #[serde(default)]
 pub struct OmdbCfg {
     pub api_key: String,
+    /// Env var read when api_key is empty.
+    pub api_key_env: String,
     pub base_url: String,
     /// "short" or "full".
     pub plot: String,
@@ -234,6 +236,14 @@ pub(crate) fn s(v: &Value) -> Option<String> {
         Value::String(x) if !x.is_empty() => Some(x.clone()),
         Value::Number(n) => Some(n.to_string()),
         _ => None,
+    }
+}
+
+/// rating_<src> (0-10) and rating_<src>_votes; 0 votes means unrated.
+pub(crate) fn put_rating(m: &mut Meta, src: &str, avg: &Value, votes: &Value) {
+    if avg.as_f64().is_some_and(|a| a > 0.0) && votes.as_u64() != Some(0) {
+        put(m, &format!("rating_{src}"), s(avg));
+        put(m, &format!("rating_{src}_votes"), s(votes));
     }
 }
 
@@ -560,6 +570,7 @@ impl Provider for Tmdb<'_> {
             date.as_ref().map(|x| x.chars().take(4).collect()),
         );
         put(&mut m, "description", s(&d["overview"]));
+        put_rating(&mut m, "tmdb", &d["vote_average"], &d["vote_count"]);
         put(&mut m, "genre", join_names(&d["genres"]));
         put(&mut m, "poster_url", self.img(&d["poster_path"]));
         put(&mut m, "tmdb_id", Some(id.clone()));
@@ -629,6 +640,7 @@ impl Provider for Tmdb<'_> {
                 }
                 put(&mut m, "episode_title", name);
                 put(&mut m, "description", s(&e["overview"]));
+                put_rating(&mut m, "tmdb", &e["vote_average"], &e["vote_count"]);
                 put(&mut m, "date", s(&e["air_date"]));
                 put(&mut m, "tmdb_episode_id", s(&e["id"]));
                 put(
@@ -1065,6 +1077,11 @@ impl Provider for Omdb<'_> {
         put(&mut m, "description", g("Plot"));
         put(&mut m, "poster_url", g("Poster"));
         put(&mut m, "rating_imdb", g("imdbRating"));
+        put(
+            &mut m,
+            "rating_imdb_votes",
+            g("imdbVotes").map(|v| v.replace(',', "")),
+        );
         for r in d["Ratings"].as_array().into_iter().flatten() {
             let k = match r["Source"].as_str() {
                 Some("Internet Movie Database") => "rating_imdb",
@@ -1293,6 +1310,7 @@ mod tests {
                 api_key: "SECRETKEY".into(),
                 base_url: "http://o/".into(),
                 plot: "short".into(),
+                ..Default::default()
             },
             http: &h,
         };

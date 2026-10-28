@@ -12,9 +12,18 @@ pub const EMBED_OMDB_KEY: Option<&str> = option_env!("JACK_OMDB_KEY");
 
 /// Fill empty TMDB/TheTVDB keys from the env vars named in config (config value > env var > embedded key).
 pub fn apply_env(p: &mut crate::providers::ProvidersCfg, get: impl Fn(&str) -> Option<String>) {
+    if p.omdb.api_key.is_empty() && !p.omdb.api_key_env.is_empty() {
+        p.omdb.api_key = get(&p.omdb.api_key_env).unwrap_or_default();
+    }
     let t = &mut p.tmdb;
     if t.read_token.is_empty() && t.api_key.is_empty() {
-        let env = |n: &str| if n.is_empty() { String::new() } else { get(n).unwrap_or_default() };
+        let env = |n: &str| {
+            if n.is_empty() {
+                String::new()
+            } else {
+                get(n).unwrap_or_default()
+            }
+        };
         t.read_token = env(&t.read_token_env);
         t.api_key = env(&t.api_key_env);
     }
@@ -24,7 +33,12 @@ pub fn apply_env(p: &mut crate::providers::ProvidersCfg, get: impl Fn(&str) -> O
 }
 
 /// Fill empty provider keys from embedded build-time keys (config file value > embedded key).
-pub fn apply_embedded(p: &mut crate::providers::ProvidersCfg, tmdb: Option<&str>, tvdb: Option<&str>, omdb: Option<&str>) {
+pub fn apply_embedded(
+    p: &mut crate::providers::ProvidersCfg,
+    tmdb: Option<&str>,
+    tvdb: Option<&str>,
+    omdb: Option<&str>,
+) {
     if p.omdb.api_key.is_empty() {
         p.omdb.api_key = omdb.unwrap_or_default().to_string();
     }
@@ -191,20 +205,30 @@ fn read(p: &Path) -> Result<Option<String>, String> {
 
 /// Main config deep-merged over the built-in defaults.
 pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
-    let mut v: toml::Value = toml::from_str(DEFAULT_CONFIG).map_err(|e| format!("built-in config: {e}"))?;
+    let mut v: toml::Value =
+        toml::from_str(DEFAULT_CONFIG).map_err(|e| format!("built-in config: {e}"))?;
     let path = match explicit {
         Some(p) => Some(expand(p)),
         None => std::env::var_os("HOME").map(|h| Path::new(&h).join(MAIN_CONFIG)),
     };
     if let Some(p) = path {
         match read(&p)? {
-            Some(t) => merge(&mut v, toml::from_str(&t).map_err(|e| format!("{}: {e}", p.display()))?),
+            Some(t) => merge(
+                &mut v,
+                toml::from_str(&t).map_err(|e| format!("{}: {e}", p.display()))?,
+            ),
             None if explicit.is_some() => return Err(format!("{}: not found", p.display())),
             None => {}
         }
     }
     let mut c: Config = v.try_into().map_err(|e| format!("config: {e}"))?;
-    for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract, &mut c.tagger.mkvmerge] {
+    for s in [
+        &mut c.tagger.atomicparsley,
+        &mut c.tagger.exiftool,
+        &mut c.tagger.mkvpropedit,
+        &mut c.tagger.mkvextract,
+        &mut c.tagger.mkvmerge,
+    ] {
         expand_s(s);
     }
     // tests never touch the real shared media.db (store tests use their own temp DB)
@@ -213,8 +237,15 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
         c.store.enabled = false;
     }
     expand_s(&mut c.store.database);
-    apply_env(&mut c.providers, |n| std::env::var(n).ok().filter(|v| !v.is_empty()));
-    apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY, EMBED_OMDB_KEY);
+    apply_env(&mut c.providers, |n| {
+        std::env::var(n).ok().filter(|v| !v.is_empty())
+    });
+    apply_embedded(
+        &mut c.providers,
+        EMBED_TMDB_TOKEN,
+        EMBED_TVDB_KEY,
+        EMBED_OMDB_KEY,
+    );
     Ok(c)
 }
 
@@ -232,9 +263,10 @@ pub fn resolve(flags: &Settings, main: &Settings) -> Settings {
 }
 
 pub fn has_ext(p: &Path, exts: &[String]) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| exts.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(e)))
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        exts.iter()
+            .any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(e))
+    })
 }
 
 #[cfg(test)]
@@ -252,25 +284,38 @@ mod tests {
         let mut p = crate::providers::ProvidersCfg::default();
         p.tmdb.api_key = "v3".into();
         apply_embedded(&mut p, Some("emb-tmdb"), None, None);
-        assert_eq!((p.tmdb.read_token.as_str(), p.thetvdb.api_key.as_str()), ("", ""));
+        assert_eq!(
+            (p.tmdb.read_token.as_str(), p.thetvdb.api_key.as_str()),
+            ("", "")
+        );
     }
 
     #[test]
     fn tvdb_key_from_named_env_var_unless_config_has_one() {
         let mut p = crate::providers::ProvidersCfg::default();
         p.thetvdb.api_key_env = "TVDB_ENV".into();
-        apply_env(&mut p, |n| (n == "TVDB_ENV").then(|| "from-env".to_string()));
+        apply_env(&mut p, |n| {
+            (n == "TVDB_ENV").then(|| "from-env".to_string())
+        });
         assert_eq!(p.thetvdb.api_key, "from-env");
         p.thetvdb.api_key = "from-config".into();
         apply_env(&mut p, |_| Some("other".into()));
         assert_eq!(p.thetvdb.api_key, "from-config");
+        p.omdb.api_key_env = "OM".into();
         p.tmdb.read_token_env = "TOK".into();
         p.tmdb.api_key_env = "KEY".into();
         apply_env(&mut p, |n| Some(format!("env-{n}")));
-        assert_eq!((p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()), ("env-TOK", "env-KEY"));
+        assert_eq!(
+            (p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()),
+            ("env-TOK", "env-KEY")
+        );
+        assert_eq!(p.omdb.api_key, "env-OM");
         p.tmdb.read_token = "cfg".into();
         p.tmdb.api_key = String::new();
         apply_env(&mut p, |_| Some("x".into()));
-        assert_eq!((p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()), ("cfg", ""));
+        assert_eq!(
+            (p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()),
+            ("cfg", "")
+        );
     }
 }
