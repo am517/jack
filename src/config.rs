@@ -10,8 +10,14 @@ pub const EMBED_TMDB_TOKEN: Option<&str> = option_env!("JACK_TMDB_TOKEN");
 pub const EMBED_TVDB_KEY: Option<&str> = option_env!("JACK_TVDB_KEY");
 pub const EMBED_OMDB_KEY: Option<&str> = option_env!("JACK_OMDB_KEY");
 
-/// Fill an empty TheTVDB key from the env var named in config (config value > env var > embedded key).
+/// Fill empty TMDB/TheTVDB keys from the env vars named in config (config value > env var > embedded key).
 pub fn apply_env(p: &mut crate::providers::ProvidersCfg, get: impl Fn(&str) -> Option<String>) {
+    let t = &mut p.tmdb;
+    if t.read_token.is_empty() && t.api_key.is_empty() {
+        let env = |n: &str| if n.is_empty() { String::new() } else { get(n).unwrap_or_default() };
+        t.read_token = env(&t.read_token_env);
+        t.api_key = env(&t.api_key_env);
+    }
     if p.thetvdb.api_key.is_empty() && !p.thetvdb.api_key_env.is_empty() {
         p.thetvdb.api_key = get(&p.thetvdb.api_key_env).unwrap_or_default();
     }
@@ -258,5 +264,13 @@ mod tests {
         p.thetvdb.api_key = "from-config".into();
         apply_env(&mut p, |_| Some("other".into()));
         assert_eq!(p.thetvdb.api_key, "from-config");
+        p.tmdb.read_token_env = "TOK".into();
+        p.tmdb.api_key_env = "KEY".into();
+        apply_env(&mut p, |n| Some(format!("env-{n}")));
+        assert_eq!((p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()), ("env-TOK", "env-KEY"));
+        p.tmdb.read_token = "cfg".into();
+        p.tmdb.api_key = String::new();
+        apply_env(&mut p, |_| Some("x".into()));
+        assert_eq!((p.tmdb.read_token.as_str(), p.tmdb.api_key.as_str()), ("cfg", ""));
     }
 }

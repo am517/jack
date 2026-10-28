@@ -96,6 +96,9 @@ pub trait Provider {
 pub struct TmdbCfg {
     pub read_token: String,
     pub api_key: String,
+    /// Env vars read when read_token / api_key are both empty.
+    pub read_token_env: String,
+    pub api_key_env: String,
     pub base_url: String,
     pub image_base: String,
     /// TMDB image size segment, e.g. "w780" or "original" (empty: none).

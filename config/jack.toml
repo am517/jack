@@ -168,6 +168,10 @@ language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", i
 read_token = ""
 api_key = ""
 
+# When both are empty, read them from these environment variables. Empty = off.
+read_token_env = "TMDB_ACCESS_TOKEN"
+api_key_env = "TMDB_API_KEY"
+
 language = "en-US"
 
 # Preferred language for backdrops.
