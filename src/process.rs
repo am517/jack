@@ -88,7 +88,9 @@ pub(crate) fn tag(path: &Path, meta: &Meta, cfg: &Config, dry: bool, out: &mut S
     let cmd = tagger::command(path, meta, &cfg.tagger)?;
     for c in std::iter::once(cmd).chain(tagger::extra_commands(path, meta, &cfg.tagger)) {
         let _ = writeln!(out, "    tag: {}", tagger::show(&c));
-        if !dry {
+        if dry {
+            tagger::discard(&c);
+        } else {
             tagger::run(&c)?;
         }
     }

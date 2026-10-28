@@ -194,10 +194,10 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
     for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract, &mut c.tagger.mkvmerge] {
         expand_s(s);
     }
-    // tests never touch the real shared media.db
+    // tests never touch the real shared media.db (store tests use their own temp DB)
     #[cfg(test)]
     if c.store.database.is_empty() {
-        c.store.database = std::env::temp_dir().join(format!("jack-tests-{}.db", std::process::id())).to_string_lossy().into_owned();
+        c.store.enabled = false;
     }
     expand_s(&mut c.store.database);
     apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY, EMBED_OMDB_KEY);

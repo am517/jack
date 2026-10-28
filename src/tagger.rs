@@ -122,7 +122,10 @@ pub fn command(file: &Path, m: &Meta, cfg: &TaggerCfg) -> Result<Vec<String>, St
         let existing = output(&[&cfg.mkvextract, &f, "tags", "-"]).unwrap_or_default();
         if let Some(x) = mkv_tags_xml(m, cfg, &existing) {
             let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let tp = std::env::temp_dir().join(format!("jack-{}-{name}.tags.xml", std::process::id()));
+            // unique per call: parallel runs on same-named files must not share a tags file
+            static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let tp = std::env::temp_dir().join(format!("jack-{}-{n}-{name}.tags.xml", std::process::id()));
             std::fs::write(&tp, x).map_err(|e| format!("{}: {e}", tp.display()))?;
             a.extend(["--tags".into(), format!("all:{}", tp.display())]);
         }
@@ -225,14 +228,19 @@ pub fn read_ids(file: &Path, cfg: &TaggerCfg) -> Meta {
         .collect()
 }
 
+/// Removes the temp tags file `command` may have written (after running it, or on a dry run).
+pub fn discard(argv: &[String]) {
+    for t in argv.iter().filter_map(|x| x.strip_prefix("all:")).filter(|x| x.ends_with(".tags.xml")) {
+        let _ = std::fs::remove_file(t);
+    }
+}
+
 pub fn run(argv: &[String]) -> Result<(), String> {
     let out = Command::new(&argv[0])
         .args(&argv[1..])
         .output()
         .map_err(|e| format!("{}: {e} (install it, e.g. `brew install atomicparsley exiftool mkvtoolnix`, or set its path under [tagger])", argv[0]))?;
-    for t in argv.iter().filter_map(|x| x.strip_prefix("all:")).filter(|x| x.ends_with(".tags.xml")) {
-        let _ = std::fs::remove_file(t); // temp tags file from `command`
-    }
+    discard(argv);
     if out.status.success() {
         Ok(())
     } else {
@@ -296,6 +304,7 @@ mod tests {
         let c = command(Path::new("a.mp4"), &episode(), &t).unwrap();
         assert!(c.contains(&"-TVShow=Saiki K".to_string()) && c.last().unwrap() == "a.mp4");
         let c = command(Path::new("b.mkv"), &movie(), &t).unwrap();
+        discard(&c);
         assert_eq!(&c[..6], ["mkvpropedit", "b.mkv", "--edit", "info", "--set", "title=The Matrix"]);
         assert!(command(Path::new("c.avi"), &movie(), &t).is_err());
         t.mp4_tool = "nope".into();
