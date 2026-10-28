@@ -135,6 +135,7 @@ pub struct Config {
     pub matching: crate::matcher::MatchCfg,
     pub sort: crate::sorter::SortCfg,
     pub naming: crate::sorter::NamingCfg,
+    pub store: crate::store::StoreCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {
@@ -193,6 +194,12 @@ pub fn load(explicit: Option<&Path>) -> Result<Config, String> {
     for s in [&mut c.tagger.atomicparsley, &mut c.tagger.exiftool, &mut c.tagger.mkvpropedit, &mut c.tagger.mkvextract, &mut c.tagger.mkvmerge] {
         expand_s(s);
     }
+    // tests never touch the real shared media.db
+    #[cfg(test)]
+    if c.store.database.is_empty() {
+        c.store.database = std::env::temp_dir().join(format!("jack-tests-{}.db", std::process::id())).to_string_lossy().into_owned();
+    }
+    expand_s(&mut c.store.database);
     apply_embedded(&mut c.providers, EMBED_TMDB_TOKEN, EMBED_TVDB_KEY, EMBED_OMDB_KEY);
     Ok(c)
 }

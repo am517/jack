@@ -291,3 +291,18 @@ tv_template = "{tv_root}/{show_en} ({show_year})/Season {season}/{show_file} S{s
 # Characters not allowed in names, and their replacement.
 illegal_chars = '/\:*?"<>|'
 replacement = "-"
+
+
+[store]
+
+# Save everything Jack fetches (chosen result, all candidates, texts, art, genres, ids) into media.db.
+enabled = true
+
+# media.db path; empty = the shared windups setting (~/.config/windups/windups.toml, database).
+database = ""
+
+# If media.db can't be opened, a JSON file is written beside the media instead: "<filename><fallback_suffix>".
+fallback_suffix = ".jack.json"
+
+# Seconds to wait for a busy database before giving up.
+busy_timeout_secs = 5

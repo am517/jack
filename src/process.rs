@@ -2,7 +2,7 @@
 use crate::config::{Config, Settings, suffixed};
 use crate::meta::{self, Meta};
 use crate::providers::{self, Http};
-use crate::{askart, sorter, tagger};
+use crate::{askart, sorter, store, tagger};
 use std::fmt::Write as _;
 use std::path::Path;
 use crate::{scan::*, fetch::*, art::*, print::*};
@@ -39,6 +39,16 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
         meta.insert("grouping".into(), g.clone());
     }
     let _ = writeln!(out, "    ids: {}", found_ids(&meta, s));
+    if !dry && cfg.store.enabled && (dl || !print) {
+        match store::save(path, &meta, &found, &cfg.store) {
+            Ok(w) => {
+                let _ = writeln!(out, "    {w}");
+            }
+            Err(e) => {
+                let _ = writeln!(out, "    warning: store: {e}");
+            }
+        }
+    }
     if s.youtube.is_some() {
         let _ = writeln!(out, "    note: --youtube is not supported yet (later phase)");
     }
