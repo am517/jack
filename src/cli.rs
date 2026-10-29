@@ -1,7 +1,7 @@
 //! Command-line flags and their mapping onto Settings.
 use crate::config::Settings;
-use std::path::PathBuf;
 use clap::Parser;
+use std::path::PathBuf;
 
 pub(crate) const ATTRIBUTION: &str = "Metadata provided by TheTVDB: https://thetvdb.com\n\
 This product uses the TMDB API but is not endorsed or certified by TMDB: https://www.themoviedb.org\n\
@@ -120,7 +120,13 @@ pub(crate) struct Cli {
 
 /// `--x` / `--no-x` (last wins) -> Some(true) / Some(false) / None.
 pub(crate) fn tri(on: bool, off: bool) -> Option<bool> {
-    if on { Some(true) } else if off { Some(false) } else { None }
+    if on {
+        Some(true)
+    } else if off {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 impl From<&Cli> for Settings {
@@ -141,7 +147,11 @@ impl From<&Cli> for Settings {
             year: c.year.clone(),
             art_style: c.art.clone(),
             grouping: c.grouping.clone(),
-            kind: c.tv.then(|| "tv".into()).or(c.movie.then(|| "movie".into())).or(c.kind.clone()),
+            kind: c
+                .tv
+                .then(|| "tv".into())
+                .or(c.movie.then(|| "movie".into()))
+                .or(c.kind.clone()),
             ..Default::default()
         }
     }
@@ -156,11 +166,21 @@ mod tests {
     fn precedence_flags_main_defaults() {
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
-        fs::write(&cfg, "output = \"/main\"\ntmdb = \"main\"\nimdb = \"main\"\n[tagger]\nexiftool = \"/x\"\n").unwrap();
+        fs::write(
+            &cfg,
+            "output = \"/main\"\ntmdb = \"main\"\nimdb = \"main\"\n[tagger]\nexiftool = \"/x\"\n",
+        )
+        .unwrap();
         let m = d.path().join("a.mp4");
         fs::write(&m, "").unwrap();
         fs::write(d.path().join("a.mp4.config"), "tmdb = \"side\"\n").unwrap(); // sidecars are ignored
-        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--imdb", "flag"]);
+        let c = cli(&[
+            m.to_str().unwrap(),
+            "--config",
+            cfg.to_str().unwrap(),
+            "--imdb",
+            "flag",
+        ]);
         let main = config::load(c.config.as_deref()).unwrap();
         assert_eq!(main.tagger.exiftool, "/x");
         assert_eq!(main.tagger.mkvpropedit, "mkvpropedit"); // deep-merged default
@@ -183,40 +203,102 @@ mod tests {
     #[test]
     fn type_flags_conflicts_and_set() {
         assert!(Cli::try_parse_from(["jack", "--tv", "--movie", "x"]).is_err());
-        assert!(run(&cli(&["--type", "movie", "--tv", "x"]), &providers::fake::FakeHttp::new(vec![])).unwrap_err().contains("conflicts"));
-        assert_eq!(Settings::from(&cli(&["--movie", "x"])).kind.as_deref(), Some("movie"));
+        assert!(
+            run(
+                &cli(&["--type", "movie", "--tv", "x"]),
+                &providers::fake::FakeHttp::new(vec![])
+            )
+            .unwrap_err()
+            .contains("conflicts")
+        );
+        assert_eq!(
+            Settings::from(&cli(&["--movie", "x"])).kind.as_deref(),
+            Some("movie")
+        );
         let d = tempfile::tempdir().unwrap();
         let c = d.path().join("c.toml");
-        run(&cli(&["--set", "--config", c.to_str().unwrap(), "--tv"]), &providers::fake::FakeHttp::new(vec![])).unwrap();
+        run(
+            &cli(&["--set", "--config", c.to_str().unwrap(), "--tv"]),
+            &providers::fake::FakeHttp::new(vec![]),
+        )
+        .unwrap();
         assert!(fs::read_to_string(&c).unwrap().contains("type = \"tv\""));
-        assert_eq!(config::load(Some(&c)).unwrap().base.kind.as_deref(), Some("tv"));
+        assert_eq!(
+            config::load(Some(&c)).unwrap().base.kind.as_deref(),
+            Some("tv")
+        );
     }
 
     #[test]
     fn no_flags_last_wins_and_set_saves_false() {
-        let f = Settings::from(&cli(&["--print", "--no-print", "--no-dry-run", "--dry-run", "x"]));
-        assert_eq!((f.print, f.dry_run, f.download_only), (Some(false), Some(true), None));
+        let f = Settings::from(&cli(&[
+            "--print",
+            "--no-print",
+            "--no-dry-run",
+            "--dry-run",
+            "x",
+        ]));
+        assert_eq!(
+            (f.print, f.dry_run, f.download_only),
+            (Some(false), Some(true), None)
+        );
         let d = tempfile::tempdir().unwrap();
         let c = d.path().join("c.toml");
         let cs = c.to_str().unwrap();
         fs::write(&c, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n").unwrap();
-        let none = || providers::fake::FakeHttp::new(vec![("/movie/1", serde_json::json!({"title":"T"}))]);
-        run(&cli(&["--set", "--config", cs, "-p", "--no-embed-artwork"]), &none()).unwrap();
-        let (o, _, _) = run(&cli(&["--set", "--config", cs, "--no-print", "--no-recursive", "--no-dry-run"]), &none()).unwrap();
+        let none =
+            || providers::fake::FakeHttp::new(vec![("/movie/1", serde_json::json!({"title":"T"}))]);
+        run(
+            &cli(&["--set", "--config", cs, "-p", "--no-embed-artwork"]),
+            &none(),
+        )
+        .unwrap();
+        let (o, _, _) = run(
+            &cli(&[
+                "--set",
+                "--config",
+                cs,
+                "--no-print",
+                "--no-recursive",
+                "--no-dry-run",
+            ]),
+            &none(),
+        )
+        .unwrap();
         assert!(o.contains("print: true -> false"), "{o}");
         let t = fs::read_to_string(&c).unwrap();
-        assert!(t.contains("print = false") && t.contains("recursive = false") && t.contains("embed_artwork = false") && t.contains("dry_run = false"), "{t}");
+        assert!(
+            t.contains("print = false")
+                && t.contains("recursive = false")
+                && t.contains("embed_artwork = false")
+                && t.contains("dry_run = false"),
+            "{t}"
+        );
         // saved print = true is undone per run by --no-print; --recursive beats saved false
         run(&cli(&["--set", "--config", cs, "-p"]), &none()).unwrap();
         let sub = d.path().join("a/b");
         fs::create_dir_all(&sub).unwrap();
         fs::write(sub.join("m.mkv"), "x").unwrap();
         let dir = d.path().join("a");
-        let args = |extra: &[&str]| { let mut v = vec![dir.to_str().unwrap(), "--config", cs, "--dry-run", "--tmdb", "1"]; v.extend(extra); cli(&v) };
+        let args = |extra: &[&str]| {
+            let mut v = vec![
+                dir.to_str().unwrap(),
+                "--config",
+                cs,
+                "--dry-run",
+                "--tmdb",
+                "1",
+            ];
+            v.extend(extra);
+            cli(&v)
+        };
         let (o, p, _) = run(&args(&[]), &none()).unwrap();
         assert!(o.contains("0 media file(s)") && p.is_empty(), "{o}");
         let (o, p, _) = run(&args(&["--recursive", "--no-print"]), &none()).unwrap();
-        assert!(o.contains("1 media file(s)") && o.contains("tag: ") && p.is_empty(), "{o}");
+        assert!(
+            o.contains("1 media file(s)") && o.contains("tag: ") && p.is_empty(),
+            "{o}"
+        );
         let (_, p, _) = run(&args(&["--recursive"]), &none()).unwrap();
         assert!(p.contains("title: T"));
     }
@@ -229,7 +311,10 @@ mod tests {
     #[test]
     fn tilde_expands() {
         let home = std::env::var("HOME").unwrap();
-        assert_eq!(config::expand(Path::new("~/x")), PathBuf::from(format!("{home}/x")));
+        assert_eq!(
+            config::expand(Path::new("~/x")),
+            PathBuf::from(format!("{home}/x"))
+        );
         assert_eq!(config::expand(Path::new("~bob/x")), PathBuf::from("~bob/x"));
     }
 

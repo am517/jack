@@ -61,7 +61,9 @@ const SHOW_IDS: [&str; 4] = ["imdb_id", "tmdb_series_id", "thetvdb_series_id", "
 fn online_extras(tx: &Transaction, id: i64, meta: &Meta) -> rusqlite::Result<()> {
     if let Some(name) = meta.get("channel") {
         let site = meta.get("site").map_or("youtube", |s| s.as_str());
-        let by_id = |cid: &String| tx.query_row("SELECT entity_id FROM external_ids WHERE source = ?1 AND scope = 'channel' AND value = ?2 AND entity_id IS NOT NULL", params![site, cid], |r| r.get::<_, i64>(0)).optional();
+        let by_id = |cid: &String| {
+            tx.query_row("SELECT entity_id FROM external_ids WHERE source = ?1 AND scope = 'channel' AND value = ?2 AND entity_id IS NOT NULL", params![site, cid], |r| r.get::<_, i64>(0)).optional()
+        };
         let found = match meta.get("channel_id") {
             Some(c) => by_id(c)?,
             None => tx.query_row("SELECT id FROM entities WHERE kind = 'organization' AND name = ?1 AND source = ?2", params![name, site], |r| r.get(0)).optional()?,
@@ -82,12 +84,21 @@ fn online_extras(tx: &Transaction, id: i64, meta: &Meta) -> rusqlite::Result<()>
     }
     if let Some(show) = meta.get("show") {
         let sid = show_row(tx, meta, show)?;
-        tx.execute("UPDATE media SET parent_id = ?2 WHERE id = ?1", params![id, sid])?;
+        tx.execute(
+            "UPDATE media SET parent_id = ?2 WHERE id = ?1",
+            params![id, sid],
+        )?;
         let src = meta.get("show_source").map_or("crossover", |s| s.as_str());
         windups::names::add_source_name(tx, "media", sid, src, show)?;
         if let Some(ch) = meta.get("channel") {
             // the channel's name for this show, untouched (display name stays the user's choice)
-            windups::names::add_source_name(tx, "media", sid, meta.get("site").map_or("youtube", |s| s.as_str()), ch)?;
+            windups::names::add_source_name(
+                tx,
+                "media",
+                sid,
+                meta.get("site").map_or("youtube", |s| s.as_str()),
+                ch,
+            )?;
         }
     }
     Ok(())
@@ -95,7 +106,11 @@ fn online_extras(tx: &Transaction, id: i64, meta: &Meta) -> rusqlite::Result<()>
 
 /// The show as its own media row, found again by any of its ids; the ids point at it.
 fn show_row(tx: &Transaction, meta: &Meta, show: &str) -> rusqlite::Result<i64> {
-    let ids: Vec<_> = IDS.iter().filter(|(k, _, _)| SHOW_IDS.contains(k)).filter_map(|(k, src, scope)| meta.get(*k).map(|v| (*src, *scope, v))).collect();
+    let ids: Vec<_> = IDS
+        .iter()
+        .filter(|(k, _, _)| SHOW_IDS.contains(k))
+        .filter_map(|(k, src, scope)| meta.get(*k).map(|v| (*src, *scope, v)))
+        .collect();
     let mut found = None;
     for (src, scope, v) in &ids {
         found = tx.query_row("SELECT media_id FROM external_ids WHERE source = ?1 AND scope = ?2 AND value = ?3 AND media_id IS NOT NULL", params![src, scope, v], |r| r.get::<_, i64>(0)).optional()?;
@@ -204,10 +219,28 @@ pub fn record(
     // unresolved: kept with all candidates and a reason, so a later run (or Sammy) can decide
     let unresolved = meta.get("resolution").is_some_and(|r| r == "unresolved");
     if unresolved {
-        let reason = meta.get("unresolved_reason").map_or("needs_llm_windup", |s| s.as_str());
-        windups::unresolved::mark(&tx, id, "jack", reason, meta.get("unresolved_detail").map_or("", |s| s.as_str()))?;
+        let reason = meta
+            .get("unresolved_reason")
+            .map_or("needs_llm_windup", |s| s.as_str());
+        windups::unresolved::mark(
+            &tx,
+            id,
+            "jack",
+            reason,
+            meta.get("unresolved_detail").map_or("", |s| s.as_str()),
+        )?;
     } else {
         windups::unresolved::resolve(&tx, id, "jack")?;
+        // tagged, but something is left to look into (e.g. the file and a source disagree)
+        if let Some(r) = meta.get("research_reason") {
+            windups::unresolved::mark(
+                &tx,
+                id,
+                "jack",
+                r,
+                meta.get("research_detail").map_or("", |s| s.as_str()),
+            )?;
+        }
         // disagreements between sources about this same work: recorded, not settled
         for (field, vals) in crate::conflicts::find(meta, found) {
             windups::conflicts::record(&tx, id, &field, &vals)?;
@@ -226,6 +259,24 @@ pub fn record(
         let cid = upsert_media(&tx, None, m, src, "candidate", Some(id))?;
         add_details(&tx, cid, m, src, false)?;
     }
+    // escalation decisions, with provenance (who, which step, when)
+    if let Some(list) = meta
+        .get("decisions")
+        .and_then(|d| serde_json::from_str::<Vec<serde_json::Value>>(d).ok())
+    {
+        for d in list {
+            let g = |k: &str| d[k].as_str().unwrap_or("").to_string();
+            windups::decisions::record(
+                &tx,
+                id,
+                "jack",
+                &g("step"),
+                &g("source"),
+                &d["decision"].to_string(),
+                &g("note"),
+            )?;
+        }
+    }
     tx.execute("INSERT INTO files(path, media_id) VALUES (?1, ?2) ON CONFLICT(path) DO UPDATE SET media_id = excluded.media_id", params![path.to_string_lossy(), id])?;
     tx.commit()?;
     Ok(id)
@@ -234,7 +285,10 @@ pub fn record(
 /// A re-run updates the same entry (found by any known id) instead of adding a duplicate.
 fn find_existing(tx: &Transaction, meta: &Meta, online: bool) -> rusqlite::Result<Option<i64>> {
     // an online video's show ids find its show, not the video
-    for (k, src, scope) in IDS.iter().filter(|(k, _, _)| !(online && SHOW_IDS.contains(k))) {
+    for (k, src, scope) in IDS
+        .iter()
+        .filter(|(k, _, _)| !(online && SHOW_IDS.contains(k)))
+    {
         if let Some(v) = meta.get(*k) {
             let r = tx.query_row("SELECT media_id FROM external_ids WHERE source = ?1 AND scope = ?2 AND value = ?3 AND media_id IS NOT NULL", params![src, scope, v], |r| r.get(0)).optional()?;
             if r.is_some() {
@@ -275,7 +329,14 @@ fn upsert_media(
     ];
     if let Some(id) = existing {
         tx.execute("DELETE FROM media WHERE canonical_id = ?1", [id])?;
-        for t in ["texts", "art", "media_genres", "media_groups", "ratings", "media_entities"] {
+        for t in [
+            "texts",
+            "art",
+            "media_genres",
+            "media_groups",
+            "ratings",
+            "media_entities",
+        ] {
             tx.execute(&format!("DELETE FROM {t} WHERE media_id = ?1"), [id])?;
         }
         tx.execute("UPDATE media SET kind=?1, title=?2, original_title=?3, year=?4, season=?5, episode=?6, rated=?7, status=?8, canonical_id=?9, source=?10, raw_json=?11, fetched_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id = ?12", rusqlite::params_from_iter(vals.iter().copied().chain([&id as &dyn rusqlite::ToSql])))?;
@@ -337,42 +398,156 @@ mod tests {
     fn online_video_channel_entity_show_parent_names_and_unresolved() {
         let d = tempfile::tempdir().unwrap();
         let mut c = windups::db::open(&d.path().join("m.db")).unwrap();
-        let m: Meta = [("kind", "online_video"), ("title", "Ep"), ("channel", "The Why Files"), ("channel_id", "UC1"), ("site", "youtube"), ("youtube_video_id", "abcdefghijk"), ("show", "The Why Files"), ("tmdb_series_id", "7"), ("resolution", "unresolved")].map(|(k, v)| (k.to_string(), v.to_string())).into();
+        let m: Meta = [
+            ("kind", "online_video"),
+            ("title", "Ep"),
+            ("channel", "The Why Files"),
+            ("channel_id", "UC1"),
+            ("site", "youtube"),
+            ("youtube_video_id", "abcdefghijk"),
+            ("show", "The Why Files"),
+            ("tmdb_series_id", "7"),
+            ("resolution", "unresolved"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .into();
         let f = vec![("tmdb".to_string(), m.clone())];
         record(&mut c, &d.path().join("a.mp4"), &m, &f).unwrap();
-        record(&mut c, &d.path().join("b.mp4"), &[("youtube_video_id", "zzzzzzzzzzz")].iter().fold(m.clone(), |mut a, (k, v)| { a.insert(k.to_string(), v.to_string()); a }), &f).unwrap();
-        assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE kind='organization'"), 1);
-        assert_eq!(count(&c, "SELECT count(*) FROM media_entities WHERE role='channel'"), 2);
+        record(
+            &mut c,
+            &d.path().join("b.mp4"),
+            &[("youtube_video_id", "zzzzzzzzzzz")]
+                .iter()
+                .fold(m.clone(), |mut a, (k, v)| {
+                    a.insert(k.to_string(), v.to_string());
+                    a
+                }),
+            &f,
+        )
+        .unwrap();
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM entities WHERE kind='organization'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM media_entities WHERE role='channel'"
+            ),
+            2
+        );
         // the show is its own parent row, holding the show ids; both videos hang off it
         assert_eq!(count(&c, "SELECT count(*) FROM media WHERE kind='show'"), 1);
-        assert_eq!(count(&c, "SELECT count(*) FROM media WHERE parent_id = (SELECT id FROM media WHERE kind='show' AND status='chosen' AND source='crossover')"), 2);
-        assert_eq!(count(&c, "SELECT count(*) FROM external_ids WHERE source='tmdb' AND media_id = (SELECT id FROM media WHERE kind='show' AND source='crossover')"), 1);
-        assert_eq!(count(&c, "SELECT count(*) FROM unresolved WHERE reason='needs_llm_windup' AND status='open'"), 2);
-        assert_eq!(count(&c, "SELECT count(*) FROM texts WHERE field='resolution'"), 0);
-        assert_eq!(count(&c, "SELECT count(*) FROM media WHERE status='candidate'"), 2);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM media WHERE parent_id = (SELECT id FROM media WHERE kind='show' AND status='chosen' AND source='crossover')"
+            ),
+            2
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM external_ids WHERE source='tmdb' AND media_id = (SELECT id FROM media WHERE kind='show' AND source='crossover')"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM unresolved WHERE reason='needs_llm_windup' AND status='open'"
+            ),
+            2
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM texts WHERE field='resolution'"),
+            0
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM media WHERE status='candidate'"),
+            2
+        );
         // names: channel and show keep every source name; display names auto-filled, user-editable
-        assert_eq!(count(&c, "SELECT count(*) FROM source_names WHERE media_id IS NOT NULL"), 2);
-        assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE display_name = 'The Why Files' AND display_name_set_by = 'auto:youtube'"), 1);
-        let sid = count(&c, "SELECT id FROM media WHERE kind='show' AND source='crossover'");
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM source_names WHERE media_id IS NOT NULL"
+            ),
+            2
+        );
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM entities WHERE display_name = 'The Why Files' AND display_name_set_by = 'auto:youtube'"
+            ),
+            1
+        );
+        let sid = count(
+            &c,
+            "SELECT id FROM media WHERE kind='show' AND source='crossover'",
+        );
         windups::names::set_display_name(&c, "media", sid, "Why Files").unwrap();
-        assert_eq!(count(&c, "SELECT count(*) FROM source_names WHERE name = 'The Why Files'"), 3);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM source_names WHERE name = 'The Why Files'"
+            ),
+            3
+        );
         let mut m2 = m.clone();
         m2.remove("resolution");
         let vid = record(&mut c, &d.path().join("a.mp4"), &m2, &f).unwrap();
-        assert_eq!(count(&c, &format!("SELECT count(*) FROM unresolved WHERE media_id = {vid} AND status='resolved'")), 1);
+        assert_eq!(
+            count(
+                &c,
+                &format!(
+                    "SELECT count(*) FROM unresolved WHERE media_id = {vid} AND status='resolved'"
+                )
+            ),
+            1
+        );
     }
 
     #[test]
     fn records_conflicts_with_the_files_own_metadata() {
         let d = tempfile::tempdir().unwrap();
         let mut c = windups::db::open(&d.path().join("m.db")).unwrap();
-        let merged = mk(&[("kind", "movie"), ("title", "The Matrix"), ("year", "1999"), ("tmdb_id", "603")]);
-        let found = vec![("tmdb".to_string(), mk(&[("title", "The Matrix"), ("year", "1999")])), ("embedded".to_string(), mk(&[("title", "The.Matrix"), ("year", "1998")]))];
+        let merged = mk(&[
+            ("kind", "movie"),
+            ("title", "The Matrix"),
+            ("year", "1999"),
+            ("tmdb_id", "603"),
+        ]);
+        let found = vec![
+            (
+                "tmdb".to_string(),
+                mk(&[("title", "The Matrix"), ("year", "1999")]),
+            ),
+            (
+                "embedded".to_string(),
+                mk(&[("title", "The.Matrix"), ("year", "1998")]),
+            ),
+        ];
         record(&mut c, Path::new("/m/a.mp4"), &merged, &found).unwrap();
-        assert_eq!(count(&c, "SELECT count(*) FROM conflicts WHERE field='year' AND status='open'"), 1);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM conflicts WHERE field='year' AND status='open'"
+            ),
+            1
+        );
         assert_eq!(count(&c, "SELECT count(*) FROM conflicts"), 1);
-        assert_eq!(count(&c, "SELECT year FROM media WHERE status='chosen'"), 1999);
-        assert_eq!(count(&c, "SELECT count(*) FROM media WHERE source='embedded'"), 1);
+        assert_eq!(
+            count(&c, "SELECT year FROM media WHERE status='chosen'"),
+            1999
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM media WHERE source='embedded'"),
+            1
+        );
     }
 
     #[test]

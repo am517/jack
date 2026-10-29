@@ -1,48 +1,73 @@
-//! The file's own metadata is the truth for facts, not for wording. Jack may keep a source's
-//! refined/expanded value when it is clearly the same thing ("Joe Rogan" -> "The Joe Rogan
-//! Experience"); a contradicting value ("Monica Rogan", another year) never replaces the file's
-//! fact: the file's value stays and the disagreement is recorded as a conflict (see conflicts).
-//! Original values are always stored (the "embedded" source row).
+//! The file's own metadata is the truth for facts, not for wording. A source's value may replace
+//! it only when it says the same thing (same words, other spacing/case/separators), or when
+//! independent evidence confirms the same entity: a shared id, a matching year, the channel
+//! mapping, or an explicit flag. Without evidence, the file's value stays and the difference is
+//! recorded (conflict, plus an entry for research). Similar wording is never proof ("Joe Rogan"
+//! vs "The Joe Rogan Experience" could be different things). Originals are always stored.
 use crate::meta::Meta;
 use crate::resolver::norm;
 
 /// Fields where the file's value is a fact.
-pub const FACTS: [&str; 7] = ["title", "show", "year", "date", "season", "episode", "episode_title"];
-/// Exact facts: any difference is a contradiction.
-const EXACT: [&str; 4] = ["year", "date", "season", "episode"];
+pub const FACTS: [&str; 7] = [
+    "title",
+    "show",
+    "year",
+    "date",
+    "season",
+    "episode",
+    "episode_title",
+];
+/// Exact facts: any difference is a contradiction, evidence or not.
+pub const EXACT: [&str; 4] = ["year", "date", "season", "episode"];
 
-/// `long` says the same as `short`, only more fully: all of short's words, in order, inside long.
-/// "Joe Rogan" -> "The Joe Rogan Experience" yes; "Joe Rogan" -> "Monica Rogan" no.
-pub fn refines(field: &str, short: &str, long: &str) -> bool {
-    let (s, l) = (norm(short), norm(long));
-    if s == l {
-        return true;
-    }
-    if EXACT.contains(&field) || s.is_empty() {
-        return false;
-    }
-    let lw: Vec<&str> = l.split(' ').collect();
-    let mut i = 0;
-    for w in s.split(' ') {
-        match lw[i..].iter().position(|x| *x == w) {
-            Some(p) => i += p + 1,
-            None => return false,
-        }
-    }
-    true
+fn y4(v: &str) -> String {
+    v.chars().take(4).collect()
 }
 
-/// Puts the file's facts back where a source contradicts them. Returns the fields kept from the file.
-pub fn apply(meta: &mut Meta, own: &Meta) -> Vec<String> {
+/// Same value, only written differently.
+pub fn same(field: &str, a: &str, b: &str) -> bool {
+    if field == "year" {
+        y4(a) == y4(b)
+    } else {
+        norm(a) == norm(b)
+    }
+}
+
+/// Why the source's answer is the same entity as the file, if anything independent says so.
+/// `flag`: an explicit flag (--imdb/--tmdb/--thetvdb, --name with --year) named it.
+pub fn evidence(meta: &Meta, own: &Meta, flag: bool) -> Option<&'static str> {
+    if flag || meta.get("evidence").is_some_and(|e| e == "flag") {
+        return Some("flag");
+    }
+    if own
+        .iter()
+        .any(|(k, v)| k.ends_with("_id") && meta.get(k) == Some(v))
+    {
+        return Some("id");
+    }
+    if meta.get("evidence").is_some_and(|e| e == "channel") {
+        return Some("channel");
+    }
+    match (own.get("year"), meta.get("year")) {
+        (Some(a), Some(b)) if y4(a).len() == 4 && y4(a) == y4(b) => Some("year"),
+        _ => None,
+    }
+}
+
+/// Puts the file's facts back wherever they are not confirmed. Returns (field, file value, source value) kept from the file.
+pub fn apply(meta: &mut Meta, own: &Meta, evidence: Option<&str>) -> Vec<(String, String, String)> {
     let mut kept = vec![];
     for f in FACTS {
-        let Some(o) = own.get(f).filter(|v| !v.trim().is_empty()) else { continue };
-        let o = if f == "year" { o.chars().take(4).collect() } else { o.clone() };
-        match meta.get(f) {
-            Some(v) if refines(f, &o, v) => {}
-            Some(_) => {
-                meta.insert(f.into(), o);
-                kept.push(f.to_string());
+        let Some(o) = own.get(f).filter(|v| !v.trim().is_empty()) else {
+            continue;
+        };
+        let o = if f == "year" { y4(o) } else { o.clone() };
+        match meta.get(f).cloned() {
+            Some(v) if same(f, &o, &v) => {}
+            Some(_) if evidence.is_some() && !EXACT.contains(&f) => {} // confirmed same entity: the fuller name stands
+            Some(v) => {
+                meta.insert(f.into(), o.clone());
+                kept.push((f.to_string(), o, v));
             }
             None => {
                 meta.insert(f.into(), o);
@@ -56,20 +81,56 @@ pub fn apply(meta: &mut Meta, own: &Meta) -> Vec<String> {
 mod tests {
     use super::*;
     fn m(kv: &[(&str, &str)]) -> Meta {
-        kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        kv.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
     #[test]
-    fn refine_yes_contradict_no() {
-        assert!(refines("show", "Joe Rogan", "The Joe Rogan Experience"));
-        assert!(refines("title", "breaking.bad", "Breaking Bad"));
-        assert!(!refines("show", "Joe Rogan", "Monica Rogan"));
-        assert!(!refines("show", "Rogan Joe", "The Joe Rogan Experience"));
-        assert!(!refines("year", "199", "1999"));
-        let mut meta = m(&[("show", "The Joe Rogan Experience"), ("year", "2010")]);
-        assert!(apply(&mut meta, &m(&[("show", "Joe Rogan"), ("year", "2010")])).is_empty());
+    fn wording_is_not_proof_evidence_is() {
+        let own = m(&[("show", "Joe Rogan")]);
+        // no evidence: the file's name stays, even for a similar-looking fuller name
+        let mut meta = m(&[("show", "The Joe Rogan Experience")]);
+        assert_eq!(evidence(&meta, &own, false), None);
+        assert_eq!(apply(&mut meta, &own, None)[0].0, "show");
+        assert_eq!(meta["show"], "Joe Rogan");
+        // a shared id confirms it: the fuller name stands
+        let own = m(&[("show", "Joe Rogan"), ("imdb_id", "tt1")]);
+        let mut meta = m(&[("show", "The Joe Rogan Experience"), ("imdb_id", "tt1")]);
+        let e = evidence(&meta, &own, false);
+        assert_eq!(e, Some("id"));
+        assert!(apply(&mut meta, &own, e).is_empty());
         assert_eq!(meta["show"], "The Joe Rogan Experience");
-        let mut meta = m(&[("show", "Monica Rogan"), ("year", "2011")]);
-        assert_eq!(apply(&mut meta, &m(&[("show", "Joe Rogan"), ("year", "2010-05-01"), ("season", "2")])), ["show", "year"]);
-        assert_eq!((meta["show"].as_str(), meta["year"].as_str(), meta["season"].as_str()), ("Joe Rogan", "2010", "2"));
+        // formatting only is always fine
+        let mut meta = m(&[("title", "Breaking Bad")]);
+        assert!(apply(&mut meta, &m(&[("title", "breaking.bad")]), None).is_empty());
+        // year match, channel mapping and flags are evidence too
+        assert_eq!(
+            evidence(
+                &m(&[("year", "2010")]),
+                &m(&[("year", "2010-05-01")]),
+                false
+            ),
+            Some("year")
+        );
+        assert_eq!(
+            evidence(&m(&[("evidence", "channel")]), &Meta::new(), false),
+            Some("channel")
+        );
+        assert_eq!(evidence(&Meta::new(), &Meta::new(), true), Some("flag"));
+        // exact facts are never replaced, evidence or not; gaps are filled from the file
+        let mut meta = m(&[("year", "2011")]);
+        let k = apply(
+            &mut meta,
+            &m(&[("year", "2010-05-01"), ("season", "2")]),
+            Some("flag"),
+        );
+        assert_eq!(
+            (
+                k[0].0.as_str(),
+                meta["year"].as_str(),
+                meta["season"].as_str()
+            ),
+            ("year", "2010", "2")
+        );
     }
 }

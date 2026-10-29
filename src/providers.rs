@@ -88,7 +88,13 @@ impl Query {
 
 pub trait Provider {
     fn name(&self) -> &'static str;
-    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String>;
+    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+        self.lookup_all(q).map(|(m, _)| m)
+    }
+    /// The answer plus every hit its search returned (same single call; empty without a search).
+    fn lookup_all(&self, q: &Query) -> Result<(Option<Meta>, Vec<Meta>), String> {
+        Ok((self.lookup(q)?, vec![]))
+    }
     /// False: this provider does not cover this kind of query (e.g. TV-only for a movie); skipped silently.
     fn handles(&self, _q: &Query) -> bool {
         true
@@ -301,7 +307,10 @@ pub fn strip_country_suffix(n: &str) -> String {
     let t = n.trim_end();
     if let Some(i) = t.rfind(" (") {
         let tag = &t[i + 2..t.len().saturating_sub(1)];
-        if t.ends_with(')') && (2..=3).contains(&tag.len()) && tag.chars().all(|c| c.is_ascii_uppercase()) {
+        if t.ends_with(')')
+            && (2..=3).contains(&tag.len())
+            && tag.chars().all(|c| c.is_ascii_uppercase())
+        {
             return t[..i].to_string();
         }
     }
@@ -549,7 +558,14 @@ impl Provider for Tmdb<'_> {
     fn name(&self) -> &'static str {
         "tmdb"
     }
-    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+    fn lookup_all(&self, q: &Query) -> Result<(Option<Meta>, Vec<Meta>), String> {
+        let mut c = vec![];
+        Ok((self.find(q, &mut c)?, c))
+    }
+}
+
+impl Tmdb<'_> {
+    fn find(&self, q: &Query, cands: &mut Vec<Meta>) -> Result<Option<Meta>, String> {
         let mut tv = q.is_tv();
         let mut id = q.tmdb.as_deref().and_then(|t| {
             digits_after(t, if t.contains('/') { "/movie/" } else { "" })
@@ -578,6 +594,7 @@ impl Provider for Tmdb<'_> {
             }
             let r = self.get(if tv { "/search/tv" } else { "/search/movie" }, &p)?;
             id = r["results"][0]["id"].as_u64().map(|x| x.to_string());
+            cands.extend(crate::candidates::tmdb(&r, tv));
         }
         let Some(id) = id else { return Ok(None) };
         let d = self.get(
@@ -844,7 +861,7 @@ impl Tvdb<'_> {
             .and_then(|(_, h)| s(&h["tvdb_id"]))
     }
     /// Movie search (only when the type is forced to movie).
-    fn movie(&self, q: &Query) -> Result<Option<Meta>, String> {
+    fn movie(&self, q: &Query, cands: &mut Vec<Meta>) -> Result<Option<Meta>, String> {
         let id = match q
             .thetvdb
             .as_deref()
@@ -858,6 +875,7 @@ impl Tvdb<'_> {
                     .map(|y| format!("&year={}", enc(y)))
                     .unwrap_or_default();
                 let r = self.get(&format!("/search?type=movie&query={}{yr}", enc(&q.title)))?;
+                cands.extend(crate::candidates::tvdb(&r, false));
                 let Some(id) = self.best(&r, q) else {
                     return Ok(None);
                 };
@@ -897,9 +915,16 @@ impl Provider for Tvdb<'_> {
     fn name(&self) -> &'static str {
         "thetvdb"
     }
-    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+    fn lookup_all(&self, q: &Query) -> Result<(Option<Meta>, Vec<Meta>), String> {
+        let mut c = vec![];
+        Ok((self.find(q, &mut c)?, c))
+    }
+}
+
+impl Tvdb<'_> {
+    fn find(&self, q: &Query, cands: &mut Vec<Meta>) -> Result<Option<Meta>, String> {
         if q.kind.as_deref() == Some("movie") {
-            return self.movie(q);
+            return self.movie(q, cands);
         }
         if !q.is_tv() {
             return Ok(None);
@@ -925,6 +950,7 @@ impl Provider for Tvdb<'_> {
                     .map(|y| format!("&year={}", enc(y)))
                     .unwrap_or_default();
                 let r = self.get(&format!("/search?type=series&query={}{yr}", enc(&q.title)))?;
+                cands.extend(crate::candidates::tvdb(&r, true));
                 let Some(id) = self.best(&r, q) else {
                     return Ok(None);
                 };
@@ -1232,8 +1258,14 @@ mod tests {
     #[test]
     fn country_suffix_stripped() {
         assert_eq!(strip_country_suffix("The Office (US)"), "The Office");
-        assert_eq!(strip_country_suffix("Doctor Who (2005)"), "Doctor Who (2005)");
-        assert_eq!(strip_year_suffix(&strip_country_suffix("Doctor Who (2005)")), "Doctor Who");
+        assert_eq!(
+            strip_country_suffix("Doctor Who (2005)"),
+            "Doctor Who (2005)"
+        );
+        assert_eq!(
+            strip_year_suffix(&strip_country_suffix("Doctor Who (2005)")),
+            "Doctor Who"
+        );
         assert_eq!(strip_country_suffix("Friends"), "Friends");
     }
 
@@ -1250,12 +1282,35 @@ mod tests {
             "animation,comedy,family,sci-fi & fantasy"
         );
         assert_eq!(
-            merge_genres(["action ADVENTURE"].into_iter(), "title", ", ", &Default::default()).unwrap(),
+            merge_genres(
+                ["action ADVENTURE"].into_iter(),
+                "title",
+                ", ",
+                &Default::default()
+            )
+            .unwrap(),
             "Action Adventure"
         );
-        let al = [("sci fi", "science fiction"), ("sci fi & fantasy", "science fiction, fantasy")].map(|(a, b)| (a.to_string(), b.to_string())).into();
+        let al = [
+            ("sci fi", "science fiction"),
+            ("sci fi & fantasy", "science fiction, fantasy"),
+        ]
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .into();
         assert_eq!(
-            merge_genres(["Science Fiction, drama", "science-fiction,Sci-Fi", "DRAMA", "Sci-Fi & Fantasy"].into_iter(), "lower", ",", &al).unwrap(),
+            merge_genres(
+                [
+                    "Science Fiction, drama",
+                    "science-fiction,Sci-Fi",
+                    "DRAMA",
+                    "Sci-Fi & Fantasy"
+                ]
+                .into_iter(),
+                "lower",
+                ",",
+                &al
+            )
+            .unwrap(),
             "drama,fantasy,science fiction"
         );
         assert!(merge_genres([""].into_iter(), "lower", ",", &Default::default()).is_none());

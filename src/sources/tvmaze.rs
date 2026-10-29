@@ -37,7 +37,7 @@ fn split_year(t: &str) -> (String, Option<String>) {
 }
 
 impl Tvmaze<'_> {
-    fn show(&self, q: &Query) -> Result<Value, String> {
+    fn show(&self, q: &Query, cands: &mut Vec<Meta>) -> Result<Value, String> {
         let b = &self.cfg.base_url;
         let url = match (&q.imdb, &q.thetvdb) {
             (Some(i), _) => format!("{b}/lookup/shows?imdb={}", enc(i)),
@@ -49,6 +49,7 @@ impl Tvmaze<'_> {
                 let r = self
                     .http
                     .get(&format!("{b}/search/shows?q={}", enc(&title)), &[])?;
+                cands.extend(crate::candidates::tvmaze(&r));
                 let hits: Vec<&Value> = r
                     .as_array()
                     .into_iter()
@@ -78,11 +79,18 @@ impl Provider for Tvmaze<'_> {
     fn handles(&self, q: &Query) -> bool {
         q.is_tv()
     }
-    fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
+    fn lookup_all(&self, q: &Query) -> Result<(Option<Meta>, Vec<Meta>), String> {
+        let mut c = vec![];
+        Ok((self.find(q, &mut c)?, c))
+    }
+}
+
+impl Tvmaze<'_> {
+    fn find(&self, q: &Query, cands: &mut Vec<Meta>) -> Result<Option<Meta>, String> {
         if !q.is_tv() {
             return Ok(None);
         }
-        let sh = self.show(q)?;
+        let sh = self.show(q, cands)?;
         let Some(id) = s(&sh["id"]) else {
             return Ok(None);
         };
@@ -197,7 +205,10 @@ mod tests {
             .unwrap()
             .is_none()
         );
-        assert!(!t.handles(&Query { kind: Some("movie".into()), ..Default::default() }));
+        assert!(!t.handles(&Query {
+            kind: Some("movie".into()),
+            ..Default::default()
+        }));
     }
 
     #[test]

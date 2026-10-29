@@ -362,8 +362,9 @@ busy_timeout_secs = 5
 
 [embedded]
 # Read the file's own metadata first; it is the truth for facts (not wording) and always kept as
-# source "embedded". A source may refine it when clearly the same ("Joe Rogan" -> "The Joe Rogan
-# Experience"); a contradiction never replaces it: the file's value stays, a conflict is recorded.
+# source "embedded". A source's value replaces it only when written the same way or when independent
+# evidence (shared id, matching year, channel mapping, explicit flag) confirms the same entity; similar
+# wording is not proof. Otherwise the file's value stays, a conflict is recorded and the item stays open.
 enabled = true
 
 # Container tag (lowercase, as ffprobe reports it) -> Jack field.
@@ -393,5 +394,33 @@ filename_id_pattern = '\[([A-Za-z0-9_-]{11})\]\.[A-Za-z0-9]+$'
 # Is the channel also a show? Merged only when exactly one TMDB show has exactly its name;
 # several exact names = stored as unresolved with all candidates, not tagged. No guessing.
 crossover_providers = ["tmdb"]
-crossover_max = 5
 crossover_keys = ["show", "tmdb_series_id", "thetvdb_series_id", "imdb_id", "genre", "network"]
+
+[explain]
+# What Jack tells you about each item he could not settle (per item, and again at the end of the
+# run). Static templates, one per unresolved reason; placeholders {file}, {reason}, {detail}.
+# Sammy (an LLM windup) can replace these with thoughtful explanations later.
+fallback = "{reason}: {detail}"
+
+[explain.templates]
+review_flag = "{file}: the reviewer flagged {detail}. Check it and fix with flags if needed."
+no_match = "No source knows it: {detail}. Check the name, or give --name with --year, or an id (--imdb tt...)."
+ambiguous = "More than one exact match: {detail}. Give --year, or an id (--imdb tt... / --tmdb ...)."
+needs_flags = "Not enough to be sure: {detail}. Give --year or --imdb tt... to say which one is meant."
+source_error = "A source failed: {detail}. Jack will retry on a later run (network or quota)."
+conflict = "Sources disagree: {detail}. Kept the file's own values; recorded for review."
+needs_llm_windup = "Needs judgement: {detail}. Kept for Sammy (LLM windup) or for you to decide."
+
+[review]
+# Optional post-run review pass (needs Sammy; skipped while none runs). One field at a time across all
+# items, in chunks, with minimal context. The reviewer only flags; nothing is rewritten. Flags are
+# logged with provenance and reported as open items (review_flag).
+enabled = false
+fields = ["title", "show", "year", "date", "description"]
+chunk = 20
+default_context = ["title", "year"]
+
+[review.context]
+description = ["title", "show", "year"]
+title = ["year", "kind"]
+show = ["year", "kind"]

@@ -1,8 +1,8 @@
 //! Is this channel also a show TMDB knows (and via it, TheTVDB and IMDb)? One search, one ids call.
-use crate::resolver::Candidate;
 use crate::config::Config;
 use crate::meta::Meta;
 use crate::providers::{Http, enc};
+use crate::resolver::Candidate;
 use std::fmt::Write as _;
 
 fn tmdb_get(path: &str, cfg: &Config, http: &dyn Http) -> Result<serde_json::Value, String> {
@@ -16,10 +16,11 @@ fn tmdb_get(path: &str, cfg: &Config, http: &dyn Http) -> Result<serde_json::Val
     } else {
         return Err("tmdb: no key".into());
     }
-    http.get(&url, &h).map_err(|e| e.replace(&t.api_key, "****").replace(&t.read_token, "****"))
+    http.get(&url, &h)
+        .map_err(|e| e.replace(&t.api_key, "****").replace(&t.read_token, "****"))
 }
 
-/// Scored show candidates for a channel name.
+/// Every show the one search returned for a channel name (the whole list, kept as candidates).
 pub fn candidates(name: &str, cfg: &Config, http: &dyn Http, out: &mut String) -> Vec<Candidate> {
     if !cfg.online.crossover_providers.iter().any(|p| p == "tmdb") {
         return vec![];
@@ -33,7 +34,6 @@ pub fn candidates(name: &str, cfg: &Config, http: &dyn Http, out: &mut String) -
     };
     let list = r["results"].as_array().cloned().unwrap_or_default();
     list.iter()
-        .take(cfg.online.crossover_max)
         .filter_map(|x| {
             let show = x["name"].as_str()?.to_string();
             let mut m = Meta::new();

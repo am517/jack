@@ -2,44 +2,147 @@
 use crate::config::{Config, Settings, suffixed};
 use crate::meta::{self, Meta};
 use crate::providers::{self, Http};
+use crate::{art::*, fetch::*, print::*, scan::*};
 use crate::{askart, online, sorter, store, tagger};
 use std::fmt::Write as _;
 use std::path::Path;
-use crate::{scan::*, fetch::*, art::*, print::*};
 
-pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, out: &mut String, pr: &mut Printed) -> Result<(), String> {
+pub(crate) fn process(
+    path: &Path,
+    s: &Settings,
+    cfg: &Config,
+    http: &dyn Http,
+    out: &mut String,
+    pr: &mut Printed,
+    hk: &mut crate::settle::Hooks,
+) -> Result<(), String> {
+    use crate::escalate::Step;
+    let file = path.to_string_lossy().into_owned();
     let dry = Settings::flag(s.dry_run);
     let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
     // the label first: the file's own metadata, kept as a source of its own
-    let own = if cfg.embedded.enabled { crate::filemeta::read(path, &cfg.online.ffprobe, &cfg.embedded.tags) } else { Meta::new() };
+    let own = if cfg.embedded.enabled {
+        crate::filemeta::read(path, &cfg.online.ffprobe, &cfg.embedded.tags)
+    } else {
+        Meta::new()
+    };
     if !own.is_empty() {
-        let _ = writeln!(out, "    embedded: {}", own.keys().cloned().collect::<Vec<_>>().join(", "));
+        let _ = writeln!(
+            out,
+            "    embedded: {}",
+            own.keys().cloned().collect::<Vec<_>>().join(", ")
+        );
     }
-    let (mut meta, mut found, unresolved) = match online_label(path, s, cfg) {
+    let (mut meta, mut found, mut unresolved) = match online_label(path, s, cfg) {
         Some(l) => {
             let o = online::fetch(&l, &show_flags(s), cfg, http, &crate::resolver::Strict, out)?;
             (o.meta, o.found, o.unresolved)
         }
         None => {
-            let q = query(path, s, cfg)?;
-            let (mut m, f) = fetch(&q, cfg, http, out)?;
-            let sure = sure(&q, s, &f);
-            if !sure {
-                let _ = writeln!(out, "    not possible with the available information: \"{}\"{} (give --name and --year, or an id)", q.title, q.year.as_deref().map(|y| format!(" ({y})")).unwrap_or_default());
+            let q = match query(path, s, cfg) {
+                Ok(q) => q,
+                Err(e) => {
+                    return incomplete(
+                        path,
+                        Step::Parse,
+                        "needs_llm_windup",
+                        e,
+                        &own,
+                        s,
+                        cfg,
+                        hk,
+                        out,
+                    );
+                }
+            };
+            let (m, f) = match fetch(&q, cfg, http, out) {
+                Ok(x) => x,
+                Err(e) => {
+                    let r = if e.contains("no match") || e.starts_with("skipped") {
+                        "no_match"
+                    } else {
+                        "source_error"
+                    };
+                    return incomplete(path, Step::Lookup, r, e, &own, s, cfg, hk, out);
+                }
+            };
+            let mut m = m;
+            if let crate::decide::Decision::Unresolved(reason, detail) =
+                crate::decide::decide(&q, s, &f)
+            {
                 m.insert("resolution".into(), "unresolved".into());
-                let named = f.iter().any(|(_, m)| crate::resolver::exact(&q.title, None, m));
-                m.insert("unresolved_reason".into(), if named { "ambiguous" } else { "no_match" }.into());
-                m.insert("unresolved_detail".into(), q.title.clone());
+                m.insert("unresolved_reason".into(), reason.to_string());
+                m.insert("unresolved_detail".into(), detail);
             }
-            (m, f, !sure)
+            let u = m.contains_key("resolution");
+            (m, f, u)
         }
     };
+    if unresolved {
+        // deterministic rules could not decide: escalate with everything known
+        let (r, d) = (
+            meta.get("unresolved_reason").cloned().unwrap_or_default(),
+            meta.get("unresolved_detail").cloned().unwrap_or_default(),
+        );
+        let mut all = found.clone();
+        if !own.is_empty() {
+            all.push(("embedded".into(), own.clone()));
+        }
+        if hk.settle(Step::Match, &file, &r, &d, &mut meta, &all, false, out) {
+            for k in ["resolution", "unresolved_reason", "unresolved_detail"] {
+                meta.remove(k);
+            }
+            unresolved = false;
+        }
+    }
     if !own.is_empty() {
         if !unresolved {
-            // the file's facts stand; refinements from sources are fine, contradictions become conflicts
-            for f in crate::facts::apply(&mut meta, &own) {
-                let _ = writeln!(out, "    conflict: {f}: keeping the file's own value; recorded");
+            // the file's facts stand unless independent evidence confirms the source means the same thing
+            let flag = [&s.imdb, &s.tmdb, &s.thetvdb]
+                .iter()
+                .any(|v| v.as_ref().is_some_and(|v| !v.is_empty()))
+                || (s.name.is_some() && s.year.is_some());
+            let ev = crate::facts::evidence(&meta, &own, flag);
+            if let Some(e) = ev {
+                meta.insert("evidence".into(), e.into());
+            }
+            let kept = crate::facts::apply(&mut meta, &own, ev);
+            for (f, o, v) in &kept {
+                let _ = writeln!(
+                    out,
+                    "    conflict: {f}: file says \"{o}\", source says \"{v}\"; keeping the file's value; recorded"
+                );
+            }
+            if !kept.is_empty() {
+                // tagged with the file's values; still open for research unless escalation decides
+                let d: Vec<String> = kept
+                    .iter()
+                    .map(|(f, o, v)| format!("{f}: file \"{o}\" vs source \"{v}\""))
+                    .collect();
+                let exact = kept
+                    .iter()
+                    .all(|(f, _, _)| crate::facts::EXACT.contains(&f.as_str()));
+                let (step, reason) = if exact {
+                    (Step::Conflict, "needs_llm_windup")
+                } else {
+                    (Step::Refine, "needs_flags")
+                };
+                let mut all = found.clone();
+                all.push(("embedded".into(), own.clone()));
+                if !hk.settle(
+                    step,
+                    &file,
+                    reason,
+                    &d.join("; "),
+                    &mut meta,
+                    &all,
+                    true,
+                    out,
+                ) {
+                    meta.insert("research_reason".into(), reason.into());
+                    meta.insert("research_detail".into(), d.join("; "));
+                }
             }
         }
         found.push(("embedded".into(), own));
@@ -48,10 +151,27 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
     // art is kept beside the file only with -d; otherwise it's a temp file removed after tagging
     let pp = art_path(path, s, dl);
     if !dry && t.ask_art && (dl || (t.embed_artwork && !print)) {
-        let prefs = |k: &str| cfg.merge.fields.get(k).unwrap_or(&cfg.merge.default).clone();
-        let c = askart::candidates(&found, all_images(&found, cfg, http), &art_keys(&meta, s, cfg), prefs, t.ask_art_max);
-        let open = (t.ask_art_open_folder.unwrap_or(cfg!(target_os = "macos")) && !t.ask_art_open_command.is_empty()).then_some(t.ask_art_open_command.as_str());
-        let o = askart::Opts { open_cmd: open, keep: dl || t.ask_art_keep };
+        let prefs = |k: &str| {
+            cfg.merge
+                .fields
+                .get(k)
+                .unwrap_or(&cfg.merge.default)
+                .clone()
+        };
+        let c = askart::candidates(
+            &found,
+            all_images(&found, cfg, http),
+            &art_keys(&meta, s, cfg),
+            prefs,
+            t.ask_art_max,
+        );
+        let open = (t.ask_art_open_folder.unwrap_or(cfg!(target_os = "macos"))
+            && !t.ask_art_open_command.is_empty())
+        .then_some(t.ask_art_open_command.as_str());
+        let o = askart::Opts {
+            open_cmd: open,
+            keep: dl || t.ask_art_keep,
+        };
         match askart::ask(path, &pp, &c, http, &o, out) {
             Ok(Some(p)) => {
                 meta.insert("poster_file".into(), p.to_string_lossy().into_owned());
@@ -81,9 +201,13 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
             }
         }
     }
+    hk.done.push((file.clone(), meta.clone()));
     if unresolved {
         // stored with every candidate above; a wrong tag is worse than none
-        let _ = writeln!(out, "    unresolved: stored with all candidates; not tagged or sorted");
+        let _ = writeln!(
+            out,
+            "    unresolved: stored with all candidates; not tagged or sorted"
+        );
         if print {
             print_meta(path, s, cfg, &meta, pr);
         }
@@ -121,7 +245,13 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
     Ok(())
 }
 
-pub(crate) fn tag(path: &Path, meta: &Meta, cfg: &Config, dry: bool, out: &mut String) -> Result<(), String> {
+pub(crate) fn tag(
+    path: &Path,
+    meta: &Meta,
+    cfg: &Config,
+    dry: bool,
+    out: &mut String,
+) -> Result<(), String> {
     let cmd = tagger::command(path, meta, &cfg.tagger)?;
     for c in std::iter::once(cmd).chain(tagger::extra_commands(path, meta, &cfg.tagger)) {
         let _ = writeln!(out, "    tag: {}", tagger::show(&c));
@@ -136,27 +266,59 @@ pub(crate) fn tag(path: &Path, meta: &Meta, cfg: &Config, dry: bool, out: &mut S
 
 /// Ids in the metadata (else the requested ones).
 pub(crate) fn found_ids(m: &Meta, s: &Settings) -> String {
-    let v: Vec<String> = ["imdb_id", "tmdb_id", "tmdb_episode_id", "thetvdb_id", "thetvdb_episode_id"].iter().filter_map(|k| m.get(*k).map(|v| format!("{}={v}", k.trim_end_matches("_id")))).collect();
+    let v: Vec<String> = [
+        "imdb_id",
+        "tmdb_id",
+        "tmdb_episode_id",
+        "thetvdb_id",
+        "thetvdb_episode_id",
+    ]
+    .iter()
+    .filter_map(|k| {
+        m.get(*k)
+            .map(|v| format!("{}={v}", k.trim_end_matches("_id")))
+    })
+    .collect();
     if v.is_empty() { ids(s) } else { v.join(" ") }
 }
 
 pub(crate) fn ids(s: &Settings) -> String {
-    let v: Vec<String> = [("imdb", &s.imdb), ("tmdb", &s.tmdb), ("thetvdb", &s.thetvdb), ("youtube", &s.youtube), ("name", &s.name), ("year", &s.year)]
-        .iter()
-        .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={v}")))
-        .collect();
-    if v.is_empty() { "-".into() } else { v.join(" ") }
+    let v: Vec<String> = [
+        ("imdb", &s.imdb),
+        ("tmdb", &s.tmdb),
+        ("thetvdb", &s.thetvdb),
+        ("youtube", &s.youtube),
+        ("name", &s.name),
+        ("year", &s.year),
+    ]
+    .iter()
+    .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k}={v}")))
+    .collect();
+    if v.is_empty() {
+        "-".into()
+    } else {
+        v.join(" ")
+    }
 }
 
 /// Online label: flags first, then what the file itself says.
 fn online_label(path: &Path, s: &Settings, cfg: &Config) -> Option<online::Label> {
-    online::from_flags(s.youtube.as_deref(), s.x.as_deref()).or_else(|| cfg.online.enabled.then(|| online::detect(path, &cfg.online)).flatten())
+    online::from_flags(s.youtube.as_deref(), s.x.as_deref()).or_else(|| {
+        cfg.online
+            .enabled
+            .then(|| online::detect(path, &cfg.online))
+            .flatten()
+    })
 }
 
 /// Show ids given as flags alongside an online video.
 fn show_flags(s: &Settings) -> Meta {
     let mut m = Meta::new();
-    for (k, v) in [("tmdb_series_id", &s.tmdb), ("thetvdb_series_id", &s.thetvdb), ("imdb_id", &s.imdb)] {
+    for (k, v) in [
+        ("tmdb_series_id", &s.tmdb),
+        ("thetvdb_series_id", &s.thetvdb),
+        ("imdb_id", &s.imdb),
+    ] {
         if let Some(v) = v.as_ref().filter(|v| !v.is_empty()) {
             m.insert(k.into(), v.trim_start_matches("/tv/").into());
         }
@@ -164,48 +326,56 @@ fn show_flags(s: &Settings) -> Meta {
     m
 }
 
-/// Enough to act on: an id, --name with --year, or a provider answer whose title and year match exactly.
-pub(crate) fn sure(q: &crate::providers::Query, s: &Settings, found: &[(String, Meta)]) -> bool {
-    let set = |o: &Option<String>| o.as_ref().is_some_and(|v| !v.is_empty());
-    if q.imdb.is_some() || q.tmdb.is_some() || q.thetvdb.is_some() || (set(&s.name) && set(&s.year)) {
-        return true;
-    }
-    let year_of = |m: &Meta| m.get("series_year").or(m.get("year")).cloned();
-    let Some(y) = q.year.as_deref() else {
-        // no year: sure only if every exact title match is the same work (one year among them)
-        let mut years: Vec<String> = found.iter().filter(|(_, m)| crate::resolver::exact(&q.title, None, m)).filter_map(|(_, m)| year_of(m)).map(|y| y.chars().take(4).collect()).collect();
-        years.sort();
-        years.dedup();
-        return years.len() == 1;
+/// Nothing usable came back, or the file could not be read: still kept (marked incomplete),
+/// escalated, explained. Never silently dropped. Returns the original error.
+#[allow(clippy::too_many_arguments)]
+fn incomplete(
+    path: &Path,
+    step: crate::escalate::Step,
+    reason: &str,
+    e: String,
+    own: &Meta,
+    s: &Settings,
+    cfg: &Config,
+    hk: &mut crate::settle::Hooks,
+    out: &mut String,
+) -> Result<(), String> {
+    let mut m = Meta::new();
+    m.insert("kind".into(), "unknown".into());
+    let stem = path
+        .file_stem()
+        .map(|x| x.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    m.insert("title".into(), own.get("title").cloned().unwrap_or(stem));
+    m.insert("resolution".into(), "unresolved".into());
+    m.insert("unresolved_reason".into(), reason.into());
+    m.insert("unresolved_detail".into(), e.clone());
+    let found: Vec<(String, Meta)> = if own.is_empty() {
+        vec![]
+    } else {
+        vec![("embedded".into(), own.clone())]
     };
-    found.iter().any(|(_, m)| {
-        let mut m = m.clone();
-        if let Some(y) = year_of(&m) {
-            m.insert("year".into(), y);
+    // a decision here only adds facts; the entry stays incomplete until a later run confirms it
+    hk.settle(
+        step,
+        &path.to_string_lossy(),
+        reason,
+        &e,
+        &mut m,
+        &found,
+        false,
+        out,
+    );
+    m.insert("completeness".into(), "incomplete".into());
+    if !Settings::flag(s.dry_run) && cfg.store.enabled {
+        match store::save(path, &m, &found, &cfg.store) {
+            Ok(w) => {
+                let _ = writeln!(out, "    kept as incomplete: {w}");
+            }
+            Err(x) => {
+                let _ = writeln!(out, "    warning: store: {x}");
+            }
         }
-        crate::resolver::exact(&q.title, Some(y), &m)
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::providers::Query;
-    fn m(t: &str, y: &str) -> Vec<(String, Meta)> {
-        vec![("tmdb".into(), [("title".to_string(), t.to_string()), ("year".to_string(), y.to_string())].into())]
     }
-    #[test]
-    fn acts_only_on_sure_information() {
-        let q = |t: &str, y: Option<&str>| Query { title: t.into(), year: y.map(String::from), ..Default::default() };
-        let none = Settings::default();
-        assert!(sure(&q("The Matrix", Some("1999")), &none, &m("The Matrix", "1999")));
-        assert!(!sure(&q("The Matrix", Some("1999")), &none, &m("The Matrix Reloaded", "2003")));
-        assert!(sure(&q("breaking.bad", None), &none, &m("Breaking Bad", "2008")));
-        let two = [m("The Office", "2005"), m("The Office", "2001")].concat();
-        assert!(!sure(&q("The Office", None), &none, &two));
-        assert!(!sure(&q("Breaking Bad", None), &none, &m("Breaking Bad: Original Minisodes", "2009")));
-        let named = Settings { name: Some("Breaking Bad".into()), year: Some("2008".into()), ..Default::default() };
-        assert!(sure(&q("Breaking Bad", Some("2008")), &named, &[]));
-        assert!(sure(&Query { imdb: Some("tt1".into()), ..q("x", None) }, &none, &[]));
-    }
+    Err(e)
 }

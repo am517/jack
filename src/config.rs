@@ -170,6 +170,8 @@ pub struct Config {
     pub store: crate::store::StoreCfg,
     pub online: crate::online::OnlineCfg,
     pub embedded: crate::filemeta::EmbeddedCfg,
+    pub explain: crate::explain::ExplainCfg,
+    pub review: crate::review::ReviewCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {

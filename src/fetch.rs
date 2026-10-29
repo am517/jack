@@ -84,7 +84,7 @@ pub(crate) fn fetch(
         cfg: pc.youtube.clone(),
         http,
     };
-    let (mut found, mut errs, mut skipped) = (vec![], vec![], vec![]);
+    let (mut found, mut errs, mut skipped, mut cands) = (vec![], vec![], vec![], vec![]);
     for name in &cfg.providers.order {
         let p: &dyn Provider = match name.as_str() {
             "tmdb" => &tmdb,
@@ -97,7 +97,10 @@ pub(crate) fn fetch(
             x => return Err(format!("[providers] order: unknown provider '{x}'")),
         };
         // extra sources reuse the ids the main providers already found
-        let late = matches!(name.as_str(), "omdb" | "wikidata" | "tvmaze" | "itunes" | "youtube");
+        let late = matches!(
+            name.as_str(),
+            "omdb" | "wikidata" | "tvmaze" | "itunes" | "youtube"
+        );
         let eq = if late {
             enrich::with_found_ids(q, &found)
         } else {
@@ -107,25 +110,33 @@ pub(crate) fn fetch(
             skipped.push(p.name());
             continue;
         }
-        match p.lookup(&eq) {
-            Ok(Some(mut m)) => {
-                if let Some(w) = m.remove(providers::WARNING) {
-                    errs.push(format!("{}: {w}", p.name()));
+        match p.lookup_all(&eq) {
+            Ok((m, c)) => {
+                if let Some(mut m) = m {
+                    if let Some(w) = m.remove(providers::WARNING) {
+                        errs.push(format!("{}: {w}", p.name()));
+                    }
+                    found.push((name.clone(), m))
                 }
-                found.push((name.clone(), m))
+                // the whole search list, from the same call
+                cands.extend(c.into_iter().map(|m| (crate::candidates::source(name), m)));
             }
-            Ok(None) => {}
             Err(e) => errs.push(format!("{}: {e}", p.name())),
         }
     }
-    if found.is_empty() {
-        return Err(if errs.is_empty() && skipped.len() == cfg.providers.order.len() {
-            format!("skipped: {} not used for this kind of title", skipped.join(", "))
-        } else if errs.is_empty() {
-            format!("no match for '{}'", q.title)
-        } else {
-            errs.join("; ")
-        });
+    if found.is_empty() && cands.is_empty() {
+        return Err(
+            if errs.is_empty() && skipped.len() == cfg.providers.order.len() {
+                format!(
+                    "skipped: {} not used for this kind of title",
+                    skipped.join(", ")
+                )
+            } else if errs.is_empty() {
+                format!("no match for '{}'", q.title)
+            } else {
+                errs.join("; ")
+            },
+        );
     }
     for e in errs {
         let _ = writeln!(out, "    warning: {e}");
@@ -178,6 +189,7 @@ pub(crate) fn fetch(
             m.insert("description".into(), format!("{d}\n\nOriginal title: {o}"));
         }
     }
+    found.extend(cands);
     Ok((m, found))
 }
 
@@ -201,7 +213,11 @@ mod tests {
     #[test]
     fn tv_only_provider_skips_movie_without_no_match() {
         let h = FakeHttp::new(vec![]);
-        let q = Query { title: "The Matrix".into(), kind: Some("movie".into()), ..Default::default() };
+        let q = Query {
+            title: "The Matrix".into(),
+            kind: Some("movie".into()),
+            ..Default::default()
+        };
         let e = fetch(&q, &cfg(&["tvmaze"]), &h, &mut String::new()).unwrap_err();
         assert!(e.starts_with("skipped") && !e.contains("no match"), "{e}");
         assert!(h.calls.borrow().is_empty());
@@ -210,11 +226,25 @@ mod tests {
     #[test]
     fn omdb_uses_imdb_id_found_by_earlier_provider() {
         let h = FakeHttp::new(vec![
-            ("/search/movie", json!({"results":[{"id":603,"title":"The Matrix","release_date":"1999-03-30"}]})),
-            ("/movie/603", json!({"id":603,"title":"The Matrix","release_date":"1999-03-30","imdb_id":"tt0133093"})),
-            ("i=tt0133093", json!({"Title":"The Matrix","Year":"1999","imdbID":"tt0133093","imdbRating":"8.7"})),
+            (
+                "/search/movie",
+                json!({"results":[{"id":603,"title":"The Matrix","release_date":"1999-03-30"}]}),
+            ),
+            (
+                "/movie/603",
+                json!({"id":603,"title":"The Matrix","release_date":"1999-03-30","imdb_id":"tt0133093"}),
+            ),
+            (
+                "i=tt0133093",
+                json!({"Title":"The Matrix","Year":"1999","imdbID":"tt0133093","imdbRating":"8.7"}),
+            ),
         ]);
-        let q = Query { title: "The Matrix".into(), year: Some("1999".into()), kind: Some("movie".into()), ..Default::default() };
+        let q = Query {
+            title: "The Matrix".into(),
+            year: Some("1999".into()),
+            kind: Some("movie".into()),
+            ..Default::default()
+        };
         let (m, _) = fetch(&q, &cfg(&["tmdb", "omdb"]), &h, &mut String::new()).unwrap();
         assert_eq!(m.get("rating_imdb").map(String::as_str), Some("8.7"));
         assert!(h.calls.borrow().iter().any(|u| u.contains("&i=tt0133093")));

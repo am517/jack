@@ -11,7 +11,15 @@ pub struct Change {
 }
 
 fn mask(v: &str, secret: bool) -> String {
-    if secret { if v.is_empty() || v == "\"\"" { "(unset)".into() } else { "********".into() } } else { v.into() }
+    if secret {
+        if v.is_empty() || v == "\"\"" {
+            "(unset)".into()
+        } else {
+            "********".into()
+        }
+    } else {
+        v.into()
+    }
 }
 
 /// Applies `changes` to the config at `path` (created from `template` if missing). Returns a report.
@@ -21,7 +29,9 @@ pub fn save(path: &Path, template: &str, changes: &[Change]) -> Result<String, S
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => template.to_string(),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let mut doc: DocumentMut = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut doc: DocumentMut = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut out = String::new();
     let mut changed = false;
     for c in changes {
@@ -32,9 +42,16 @@ pub fn save(path: &Path, template: &str, changes: &[Change]) -> Result<String, S
             if !t.contains_key(p) {
                 t.insert(p, Item::Table(toml_edit::Table::new()));
             }
-            t = t[*p].as_table_mut().ok_or(format!("{}: '{}' is not a table", path.display(), c.key))?;
+            t = t[*p].as_table_mut().ok_or(format!(
+                "{}: '{}' is not a table",
+                path.display(),
+                c.key
+            ))?;
         }
-        let old = t.get(last).and_then(|i| i.as_value()).map(|v| v.clone().decorated("", "").to_string());
+        let old = t
+            .get(last)
+            .and_then(|i| i.as_value())
+            .map(|v| v.clone().decorated("", "").to_string());
         let new = c.value.clone().decorated("", "").to_string();
         if old.as_deref() == Some(new.as_str()) {
             let _ = writeln!(out, "{}: unchanged", c.key);
@@ -52,7 +69,13 @@ pub fn save(path: &Path, template: &str, changes: &[Change]) -> Result<String, S
             }
         }
         changed = true;
-        let _ = writeln!(out, "{}: {} -> {}", c.key, old.map_or("(unset)".into(), |o| mask(&o, c.secret)), mask(&new, c.secret));
+        let _ = writeln!(
+            out,
+            "{}: {} -> {}",
+            c.key,
+            old.map_or("(unset)".into(), |o| mask(&o, c.secret)),
+            mask(&new, c.secret)
+        );
     }
     if changed {
         if let Some(d) = path.parent() {

@@ -25,25 +25,49 @@ fn tidy(s: &str, cfg: &MatchCfg) -> Result<String, String> {
     for c in &cfg.cleanup {
         s = re(c)?.replace_all(&s, " ").into_owned();
     }
-    Ok(s.split_whitespace().collect::<Vec<_>>().join(" ").trim_matches(|c: char| " -([".contains(c)).to_string())
+    Ok(s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(|c: char| " -([".contains(c))
+        .to_string())
 }
 
 /// `kind`: Some("tv") skips movie patterns, Some("movie") skips TV patterns.
 pub fn parse(path: &Path, cfg: &MatchCfg, kind: Option<&str>) -> Result<Query, String> {
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let stem = if cfg.separators.is_empty() { stem } else { re(&cfg.separators)?.replace_all(&stem, " ").into_owned() };
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stem = if cfg.separators.is_empty() {
+        stem
+    } else {
+        re(&cfg.separators)?.replace_all(&stem, " ").into_owned()
+    };
     let mut q = Query::default();
     let none = vec![];
-    for p in if kind == Some("movie") { &none } else { &cfg.tv_patterns } {
+    for p in if kind == Some("movie") {
+        &none
+    } else {
+        &cfg.tv_patterns
+    } {
         if let Some(c) = re(p)?.captures(&stem) {
             q.season = c.name("season").and_then(|m| m.as_str().parse().ok());
             q.episode = c.name("episode").and_then(|m| m.as_str().parse().ok());
-            q.episode_title = Some(tidy(&stem[c.get(0).map_or(0, |m| m.end())..], cfg)?).filter(|t| !t.is_empty());
+            q.episode_title = Some(tidy(&stem[c.get(0).map_or(0, |m| m.end())..], cfg)?)
+                .filter(|t| !t.is_empty());
             q.title = tidy(c.name("show").map_or("", |m| m.as_str()), cfg)?;
             if q.title.is_empty() && cfg.show_from_parent_dir {
-                let dir = path.parent().and_then(|d| d.file_name()).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+                let dir = path
+                    .parent()
+                    .and_then(|d| d.file_name())
+                    .map(|d| d.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 let dir = if dir.to_lowercase().starts_with("season") {
-                    path.parent().and_then(|d| d.parent()).and_then(|d| d.file_name()).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()
+                    path.parent()
+                        .and_then(|d| d.parent())
+                        .and_then(|d| d.file_name())
+                        .map(|d| d.to_string_lossy().into_owned())
+                        .unwrap_or_default()
                 } else {
                     dir
                 };
@@ -52,7 +76,11 @@ pub fn parse(path: &Path, cfg: &MatchCfg, kind: Option<&str>) -> Result<Query, S
             return Ok(q);
         }
     }
-    for p in if kind == Some("tv") { &none } else { &cfg.movie_patterns } {
+    for p in if kind == Some("tv") {
+        &none
+    } else {
+        &cfg.movie_patterns
+    } {
         if let Some(c) = re(p)?.captures(&stem) {
             q.title = tidy(c.name("title").map_or("", |m| m.as_str()), cfg)?;
             q.year = c.name("year").map(|m| m.as_str().to_string());
@@ -73,21 +101,48 @@ mod tests {
     use super::*;
 
     fn cfg() -> MatchCfg {
-        crate::config::load(Some(Path::new("config/jack.toml"))).unwrap().matching
+        crate::config::load(Some(Path::new("config/jack.toml")))
+            .unwrap()
+            .matching
     }
 
     #[test]
     fn movies_and_tv() {
-        let q = parse(Path::new("The.Matrix.1999.1080p.BluRay.x264.mkv"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.year.as_deref(), q.season), ("The Matrix", Some("1999"), None));
+        let q = parse(
+            Path::new("The.Matrix.1999.1080p.BluRay.x264.mkv"),
+            &cfg(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            (q.title.as_str(), q.year.as_deref(), q.season),
+            ("The Matrix", Some("1999"), None)
+        );
         let q = parse(Path::new("Blade Runner 2049 (2017).mp4"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.year.as_deref()), ("Blade Runner 2049", Some("2017")));
+        assert_eq!(
+            (q.title.as_str(), q.year.as_deref()),
+            ("Blade Runner 2049", Some("2017"))
+        );
         let q = parse(Path::new("Saiki.K.S01E02.720p.WEB-DL.mkv"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.season, q.episode, q.episode_title), ("Saiki K", Some(1), Some(2), None));
+        assert_eq!(
+            (q.title.as_str(), q.season, q.episode, q.episode_title),
+            ("Saiki K", Some(1), Some(2), None)
+        );
         let q = parse(Path::new("The.Apothecary.Diaries.S03E01.Locusts.REPACK.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mp4"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.season, q.episode, q.episode_title.as_deref()), ("The Apothecary Diaries", Some(3), Some(1), Some("Locusts")));
+        assert_eq!(
+            (
+                q.title.as_str(),
+                q.season,
+                q.episode,
+                q.episode_title.as_deref()
+            ),
+            ("The Apothecary Diaries", Some(3), Some(1), Some("Locusts"))
+        );
         let q = parse(Path::new("Show/Season 2/2x05.m4v"), &cfg(), None).unwrap();
-        assert_eq!((q.title.as_str(), q.season, q.episode), ("Show", Some(2), Some(5)));
+        assert_eq!(
+            (q.title.as_str(), q.season, q.episode),
+            ("Show", Some(2), Some(5))
+        );
         let q = parse(Path::new("home video.mp4"), &cfg(), None).unwrap();
         assert_eq!((q.title.as_str(), q.year), ("home video", None));
         // forced type skips the other heuristics
