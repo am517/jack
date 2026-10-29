@@ -1,0 +1,5 @@
+name = "ben"
+role = "builds"
+summary = "Ben rebuilds the windups for new platforms (cross-compiles and packages them) so they stay portable with no system services."
+status = "stub"
+command = "ben --capabilities"
