@@ -3,19 +3,38 @@
 A windup is a small program that does one job well. Windups call each other; a "super" windup
 orchestrates others. This file is the contract. Anything shared lives in this repo.
 
+## Cast list
+
+- **Jack**: fetches and verifies metadata for a file (gathers facts), hands one entry to Daniel.
+- **Daniel**: the database; takes handoffs, asks Larry and Ruth, stores, calls Walter.
+- **Walter**: patrol; called by windups, schedules returns and calls windups back, then exits.
+- **Larry**: hashing: exact BLAKE3 (partial first, full later) and the perceptual fingerprint.
+- **Tom**: vectors/embeddings for meaning search.
+- **Mary**: summaries (before Tom only).
+- **Kate**: image conversion (JPEG to embed, JPEG XL to archive).
+- **Sammy**: judgment, when evidence alone can't decide.
+- **Julie**: verification against evidence; calls Sammy when judgment is needed.
+- **Ruth**: builds the APA 7 work reference and work key.
+- **Margaret**: directory; knows every windup's capabilities.
+- **Oliver**: matchmaker; breaks requests down and teams windups up.
+- **Ben**: rebuilds the windups for new platforms.
+
 ## Roster
 
 | Windup | Job | Status |
 |---|---|---|
 | Jack | fetches and verifies metadata for a file, hands one complete entry to Daniel | building |
 | Lauren | tags and embeds (writes metadata/art into files) | later |
-| Sammy | the brains: picks the best value when sources disagree, summarizes | later |
-| Daniel | database manager: populates and keeps everything (an archive-ophile); takes Jack's handoff | stub (trait in windups, store in Jack) |
+| Sammy | judgment: decides when evidence alone can't (a resource entries wait for) | stub crate |
+| Julie | verification: checks entries against evidence, calls Sammy when judgment is needed | stub crate |
+| Ruth | references: APA 7 work reference and key from gathered facts | library (real code) |
+| Ben | builds: rebuilds the windups for new platforms | stub crate |
+| Daniel | database manager: populates and keeps everything (an archive-ophile); takes Jack's handoff | own crate (real store code) |
 | Larry | hashing: exact (BLAKE3, partial first, full later) and perceptual | stub crate (hashing works, perceptual placeholder) |
 | Tom | vectors/embeddings for meaning search | stub crate |
-| Mary | summaries; runs before Larry/Tom where they depend on it | stub crate |
+| Mary | summaries; runs before Tom only, never blocks Larry | stub crate |
 | Kate | image conversion: JPEG to embed, JPEG XL to archive | stub crate |
-| Walter | patrol: watches the database for unfinished work and calls windups back (name pending Adam's OK) | building |
+| Walter | patrol: watches the database for unfinished work and calls windups back | working |
 | Steve | finds local information in the database (search) | later |
 | Sally | organizes files (rename, move, sort) | later |
 | Tammy | super windup: ingests new media by orchestrating the others | later |
@@ -236,10 +255,10 @@ downgraded). Online videos are never provisional.
 
 **Architecture.** Jack ONLY fetches and verifies metadata for a file and hands one complete entry
 (`windups::handoff::Handoff`) to Daniel (`windups::handoff::Daniel`). Processing lives elsewhere:
-- **Daniel** stores it. For now a stub in Jack (`daniel.rs`) wraps the existing store code.
+- **Daniel** stores it (own crate since round 7).
 - **Larry** hashes: exact BLAKE3, `partial` by default (head + tail + size), full later as resources
   permit; and the perceptual fingerprint (still a placeholder). Daniel calls Larry before storing.
-- **Mary** summarises, before Larry/Tom where they depend on it. **Tom** embeds. **Kate** converts
+- **Mary** summarises, before Tom only. **Tom** embeds. **Kate** converts
   images (JPEG embedded, JPEG XL archive). All stubs with a trait and a test.
 - **Walter** patrols (below).
 
@@ -258,3 +277,20 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
 - A return reschedules (with the next back-off) whenever the entry's `last_checked` differs from the
   one it was scheduled against; Jack stamps `last_checked` on every save, Walter after each call.
 - Jack's `pending`/`retry` commands are gone; that logic lives in Walter.
+
+## Round 7 (Adam, 2026-10-28): who calls whom
+
+- **No daemon, no timers, portable.** Windups call Walter: Daniel calls `walter note --db DB` after
+  storing (Walter schedules returns, calls nobody, exits). Optional: skipped quietly if neither
+  `walter` nor `windups-walter` is on PATH (`[walter]` in daniel.toml). `walter patrol` (which calls
+  Jack) is for a windup that wants work redone; `note` never calls back, so there are no loops.
+- **Daniel is his own crate** (store code moved from Jack). Jack calls him only through
+  `windups::handoff::Daniel`, passing the disagreements he found between sources (`conflicts`).
+- **Ruth builds references** (code moved from Jack); Jack only gathers facts. A reference is
+  provisional whenever it can't be fully built: a missing original title (or original show/episode
+  title), original language, or episode title; `missing` lists what.
+- **Verifying and thinking are separate.** Julie verifies against evidence; Sammy judges, and is a
+  resource like any other. Waits name the windup waited on: `unverified` waits for `julie`,
+  `not_identified` for `sammy`, `undetermined`/`incomplete` for `new_source`.
+- **Mary** precedes Tom only; she never blocks Larry.
+- Stubs (profile, README, `--capabilities`): Sammy, Julie, Margaret, Oliver, Ben; and Tom, Mary, Kate.

@@ -29,16 +29,18 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 4. **Steve**: search the database (genres, people, dates, full text, meaning; graph later)
 5. **Sally**: organizes files (takes over Jack's built-in sorting; Jack keeps a fallback)
 6. **Tammy**: super windup; ingests new media by orchestrating the others
-7. **Oliver**: manager/matchmaker (much later; revisit after Margaret)
-8. **Margaret**: receptionist/directory of windups and capabilities (later, once there are too many to know personally)
+7. **Oliver**: manager/matchmaker (stub crate; much later)
+8. **Margaret**: receptionist/directory of windups and capabilities (stub crate)
 - Update windup (files and database together), name TBD
 
 - Real perceptual fingerprinter (jack `fingerprint.rs`): sampled-frame pHashes via ffmpeg (robust to
   re-encode/resize/crop/rotation/aspect), optional Chromaprint audio; tune `max_distance`. Then a way for
   the user/Sammy to accept/reject `proposals` (accept → `lifecycle::merge`).
-- Returns: Walter patrols when another windup calls him (no timers, by Adam's rule). Who calls Walter, and how often, is open (Tammy after each ingest?).
-- Move Jack's `store.rs` into a real Daniel crate; Jack keeps only the handoff.
+- Walter: Daniel calls `walter note` after storing; who calls `walter patrol` (re-runs due work) is open (Tammy after each ingest?).
+- Ben: rebuild the windups for new platforms (cross-compile, package); keeps everything portable.
+- Julie: real verification (move Jack's verify steps over); Sammy: real judgment.
+- Margaret, Oliver: beyond stubs when needed.
+- Ruth: a CLI (`ruth --capabilities`, reference from JSON) if other windups need it outside Daniel.
 - Larry: a full-hash pass over partial-hashed files as resources permit.
 - Larry: real perceptual fingerprint, aligning by audio first, then frames.
 - Tom, Mary, Kate: real implementations (Kate converts Jack's art).
-- Walter's name pending Adam's OK.
