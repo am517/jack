@@ -145,8 +145,8 @@ pub fn save(
     meta: &Meta,
     found: &[(String, Meta)],
     cfg: &StoreCfg,
-    fper: &dyn crate::fingerprint::Fingerprinter,
-    fcfg: &crate::fingerprint::FingerprintCfg,
+    fper: &dyn larry::fingerprint::Fingerprinter,
+    fcfg: &larry::fingerprint::FingerprintCfg,
 ) -> Result<String, String> {
     let db = db_path(cfg).and_then(|p| windups::db::open(&p).map(|c| (p, c)));
     match db {
@@ -156,7 +156,7 @@ pub fn save(
             let id = record(&mut c, path, meta, found).map_err(|e| e.to_string())?;
             if let Some(fp) = meta.get("file_fingerprint") {
                 // hints only: open proposals, never merge
-                crate::fingerprint::propose_similar(&c, id, fp, fper, fcfg)
+                larry::fingerprint::propose_similar(&c, id, fp, fper, fcfg)
                     .map_err(|e| e.to_string())?;
             }
             Ok(format!("database: media #{id} in {}", p.display()))
@@ -290,13 +290,11 @@ pub fn record(
             .map_or("", |s| s.as_str());
         windups::lifecycle::set(&tx, id, stage, "jack", why)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
-        // finish well: anything not complete gets a scheduled return
-        if stage == "complete" {
-            windups::returns::clear(&tx, id)?;
-        } else {
-            let w = meta.get(crate::returns::WAITING_FOR).map(String::as_str);
-            windups::returns::schedule(&tx, id, stage, why, w, &crate::returns::backoff(meta))?;
-        }
+        // when Jack last looked; Walter decides from this, the stage and the reason when to call again
+        tx.execute(
+            "UPDATE media SET last_checked = strftime('%Y-%m-%d %H:%M:%f', 'now') WHERE id = ?1",
+            [id],
+        )?;
     }
     // escalation decisions, with provenance (who, which step, when)
     if let Some(list) = meta
@@ -324,14 +322,17 @@ pub fn record(
         Some(crate::stage::UNDETERMINED) | Some("not_identified")
     ) {
         if let Some(r) = crate::workkey::reference(meta) {
+            let ids = crate::workkey::ids(meta);
             windups::works::link(
                 &tx,
                 id,
-                &crate::workkey::key(&r),
-                &r,
-                &crate::workkey::ids(meta),
-            )
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+                &windups::works::Work {
+                    key: &crate::workkey::key(&r.text),
+                    reference: &r.text,
+                    provisional: r.provisional,
+                    ids: &ids,
+                },
+            )?;
         }
     }
     tx.commit()?;
@@ -730,7 +731,7 @@ mod tests {
                 &meta,
                 &found,
                 &cfg,
-                &crate::fingerprint::NoFingerprint,
+                &larry::fingerprint::NoFingerprint,
                 &Default::default()
             )
             .unwrap()
@@ -749,7 +750,7 @@ mod tests {
                 &meta,
                 &found,
                 &bad,
-                &crate::fingerprint::NoFingerprint,
+                &larry::fingerprint::NoFingerprint,
                 &Default::default()
             )
             .unwrap()
@@ -802,12 +803,12 @@ mod tests {
         assert_eq!(
             count(
                 &c,
-                "SELECT count(DISTINCT work_key) FROM media WHERE work_key IS NOT NULL"
+                "SELECT count(DISTINCT work_id) FROM media WHERE work_id IS NOT NULL"
             ),
             1
         );
         assert_eq!(
-            count(&c, "SELECT count(*) FROM media WHERE work_key IS NOT NULL"),
+            count(&c, "SELECT count(*) FROM media WHERE work_id IS NOT NULL"),
             2
         );
     }

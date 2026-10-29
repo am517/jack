@@ -449,6 +449,7 @@ version = "0.1.7"
 dependencies = [
  "blake3",
  "clap",
+ "larry",
  "regex",
  "rpassword",
  "rusqlite",
@@ -460,6 +461,17 @@ dependencies = [
  "unicode-normalization",
  "ureq",
  "walkdir",
+ "windups",
+]
+
+[[package]]
+name = "larry"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rusqlite",
+ "serde",
+ "toml",
  "windups",
 ]
 

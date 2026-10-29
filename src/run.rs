@@ -463,7 +463,6 @@ mod tests {
             meta["decisions"]
         );
         assert_ne!(meta["lifecycle"], "complete", "a name is not an id");
-        assert!(meta["file_hash"].starts_with("b3:"));
         assert!(out.contains("warning: tmdb: no S03E01"), "{out}");
         assert!(
             out.contains("tmdb=220542") && out.contains("433631"),

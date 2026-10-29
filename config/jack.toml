@@ -446,31 +446,3 @@ episode = ["cast", "air_date", "runtime"]
 show = ["cast", "network"]
 online_video = ["duration", "thumbnail_url"]
 
-# Exact content hash (BLAKE3), stored per file to re-find renamed or moved files.
-# mode "full": whole file, an equal hash proves an identical file.
-# mode "partial": size + start/middle/end chunks; much faster on big files, a hint only.
-[hash]
-enabled = true
-mode = "full"
-chunk_bytes = 1048576
-full_below_bytes = 16777216
-
-# Perceptual fingerprint (sampled frames, optional audio): survives re-encodes and crops.
-# A close match only opens a "possible_same" proposal; nothing is merged automatically.
-# Off until a real fingerprinter exists (see TODO.md).
-[fingerprint]
-enabled = false
-frames = 16
-audio = false
-max_distance = 0.15
-
-# Windups finish well: every entry that isn't complete comes back. After back-off hours (by attempt;
-# the last value repeats), or as soon as the capability its stage waits for appears.
-[retry]
-backoff_hours = [1, 24, 168, 720]
-
-[retry.wait_for]
-not_identified = "sammy"   # ambiguous or unknown: needs judgement
-unverified = ""            # time only: a source may learn the id
-incomplete = ""
-undetermined = ""

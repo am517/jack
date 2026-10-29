@@ -3,7 +3,7 @@ use crate::config::{Config, Settings, suffixed};
 use crate::meta::{self, Meta};
 use crate::providers::{self, Http};
 use crate::{art::*, fetch::*, print::*, scan::*};
-use crate::{askart, online, sorter, store, tagger};
+use crate::{askart, online, sorter, tagger};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -21,12 +21,6 @@ pub(crate) fn process(
     let dry = Settings::flag(s.dry_run);
     let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
-    // exact content hash: re-finds this file if it is renamed or moved
-    let fhash = if cfg.hash.enabled {
-        crate::hash::file_hash(path, &cfg.hash).ok()
-    } else {
-        None
-    };
     // the label first: the file's own metadata, kept as a source of its own
     let own = if cfg.embedded.enabled {
         crate::filemeta::read(path, &cfg.online.ffprobe, &cfg.embedded.tags)
@@ -199,16 +193,6 @@ pub(crate) fn process(
         let _ = writeln!(out, "    incomplete: missing {}", missing.join(", "));
     }
     meta.insert("lifecycle".into(), stage.into());
-    crate::returns::plan(&mut meta, &cfg.retry);
-    if let Some(h) = &fhash {
-        meta.insert("file_hash".into(), h.clone());
-    }
-    if cfg.fingerprint.enabled {
-        use crate::fingerprint::Fingerprinter;
-        if let Some(fp) = crate::fingerprint::NoFingerprint.fingerprint(path, &cfg.fingerprint) {
-            meta.insert("file_fingerprint".into(), fp);
-        }
-    }
     let t = &cfg.tagger;
     // art is kept beside the file only with -d; otherwise it's a temp file removed after tagging
     let pp = art_path(path, s, dl);
@@ -254,14 +238,7 @@ pub(crate) fn process(
     }
     let _ = writeln!(out, "    ids: {}", found_ids(&meta, s));
     if !dry && cfg.store.enabled && (dl || !print) {
-        match store::save(
-            path,
-            &meta,
-            &found,
-            &cfg.store,
-            &crate::fingerprint::NoFingerprint,
-            &cfg.fingerprint,
-        ) {
+        match crate::daniel::hand_over(path, &meta, &found, &cfg.store) {
             Ok(w) => {
                 let _ = writeln!(out, "    {w}");
             }
@@ -438,21 +415,8 @@ fn incomplete(
     m.insert("completeness".into(), "incomplete".into());
     // file purgatory: only the file's own values, kept under a stable id until identified or merged
     m.insert("lifecycle".into(), crate::stage::UNDETERMINED.into());
-    crate::returns::plan(&mut m, &cfg.retry);
-    if cfg.hash.enabled {
-        if let Ok(h) = crate::hash::file_hash(path, &cfg.hash) {
-            m.insert("file_hash".into(), h);
-        }
-    }
     if !Settings::flag(s.dry_run) && cfg.store.enabled {
-        match store::save(
-            path,
-            &m,
-            &found,
-            &cfg.store,
-            &crate::fingerprint::NoFingerprint,
-            &cfg.fingerprint,
-        ) {
+        match crate::daniel::hand_over(path, &m, &found, &cfg.store) {
             Ok(w) => {
                 let _ = writeln!(out, "    kept as incomplete: {w}");
             }
