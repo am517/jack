@@ -7,4 +7,5 @@
 .env.*
 *.key
 secrets*
+!src/secrets.rs
 /config/config.toml

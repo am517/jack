@@ -6,4 +6,4 @@ description = "Mary, the summary windup (stub)"
 license = "MIT"
 
 [dependencies]
-windups = { path = "../windups" }
+windups.workspace = true

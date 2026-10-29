@@ -2,11 +2,23 @@ name = "rover"
 role = "refining"
 summary = "Rover refines other windups: strictly bound by each windup's purpose and success checks, he proposes changes and tests them, and never applies anything unreviewed."
 purpose = "Make each windup better at its own purpose, and only that."
-success_checks = [
-  "every proposed change cites the windup's purpose and the checks it improves",
-  "every proposal is tested against that windup's success checks before review",
-  "nothing is applied without review",
-]
 status = "stub"
 command = "rover --capabilities"
+rules = [
+  "leave it as you found it or better",
+  "better, faster, stronger: never regress a windup's purpose, its tests or these rules",
+  "every success check stays a passing test",
+]
 never = ["apply an unreviewed change", "change a windup's purpose or checks", "work outside a windup's profile"]
+
+[[success_checks]]
+check = "every proposed change cites the windup's purpose and the checks it improves"
+pending = "stub: no test yet"
+
+[[success_checks]]
+check = "every proposal is tested against that windup's success checks before review"
+pending = "stub: no test yet"
+
+[[success_checks]]
+check = "nothing is applied without review"
+pending = "stub: no test yet"

@@ -4,8 +4,8 @@ version = "0.1.7"
 edition = "2024"
 description = "Tag and sort movie and TV files"
 license = "MIT"
-repository = "https://github.com/am517/jack"
-homepage = "https://github.com/am517/jack"
+repository = "https://github.com/am517/windups"
+homepage = "https://github.com/am517/windups"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -18,9 +18,9 @@ serde_json = "1"
 regex = { version = "1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
 ureq = { version = "2", features = ["json"] }
 unicode-normalization = "0.1.26"
-windups = { path = "../windups" }
+windups.workspace = true
 rusqlite = "0.32"
-daniel = { path = "../daniel" }
+daniel.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -2,10 +2,14 @@ name = "mary"
 role = "summaries"
 summary = "Mary writes short summaries of entries from their stored texts. Runs before Tom (he embeds her summary); never blocks Larry."
 purpose = "Give every entry a short, faithful summary."
-success_checks = [
-  "a summary only states what the stored texts say",
-  "Mary runs before Tom and never blocks Larry",
-]
 status = "stub"
 reads = ["entry texts (descriptions, plots)"]
 writes = ["summary (via Daniel)"]
+
+[[success_checks]]
+check = "a summary only states what the stored texts say"
+pending = "stub: no test yet"
+
+[[success_checks]]
+check = "Mary runs before Tom and never blocks Larry"
+pending = "stub: no test yet"

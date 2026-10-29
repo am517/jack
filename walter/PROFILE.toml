@@ -2,16 +2,29 @@ name = "walter"
 role = "patrol"
 summary = "Windups call Walter (e.g. Daniel when enough has changed); whatever he is called for, he patrols the whole database, then exits; no daemon or timers. Walter patrols the shared database for unfinished work. Every entry that isn't complete has a scheduled return; Walter decides from its stage, reason, last check and returns when to call the right windup again, and wakes waiting entries when a new windup or source appears."
 purpose = "Make sure nothing unfinished is forgotten: every incomplete entry is revisited."
-success_checks = [
-  "every entry that isn't complete or merged has a scheduled return after a patrol",
-  "complete and merged entries have no return",
-  "items waiting for a windup or source become due when it appears",
-  "`walter pending` changes nothing and calls nobody",
-  "no timers: Walter runs only when called",
-]
 status = "working (note, pending, patrol)"
 reads = ["media.db (media lifecycle, last_checked, status_history, returns, windups, capabilities)"]
 writes = ["media.db (returns, capabilities)"]
 calls = ["jack (and other windups) with the files that are due"]
 never = ["decide what a file is", "run on a system timer: windups call windups"]
 command = "walter [patrol | note | pending] [--all] [--wake CAPABILITY] [--db PATH] [--config PATH]"
+
+[[success_checks]]
+check = "every entry that isn't complete or merged has a scheduled return after a patrol"
+test = "walter/tests/patrol.rs::nothing_incomplete_is_forgotten"
+
+[[success_checks]]
+check = "complete and merged entries have no return"
+test = "walter/tests/patrol.rs::nothing_incomplete_is_forgotten"
+
+[[success_checks]]
+check = "items waiting for a windup or source become due when it appears"
+test = "walter/tests/patrol.rs::nothing_incomplete_is_forgotten"
+
+[[success_checks]]
+check = "`walter pending` changes nothing and calls nobody"
+test = "walter/tests/patrol.rs::nothing_incomplete_is_forgotten"
+
+[[success_checks]]
+check = "no timers: Walter runs only when called"
+test = "walter/tests/patrol.rs::nothing_incomplete_is_forgotten"

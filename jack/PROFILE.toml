@@ -5,12 +5,6 @@ name = "jack"
 role = "metadata"
 summary = "Jack is the boss of all metadata. He reads a media file's own label first, looks it up in online databases, keeps everything he finds, and acts only on sure decisions."
 purpose = "Know what every media file is, from the file's own facts and online sources, without ever guessing."
-success_checks = [
-  "every file processed gets exactly one entry handed to Daniel",
-  "no guesses: an unsettled choice is stored as not_identified with all candidates and a reason",
-  "only an id (from the file or a confirmed match) moves an entry to complete",
-  "every source answer is kept as a candidate, never overwritten",
-]
 status = "active"
 kinds = ["movie", "episode", "online_video"]
 later_kinds = ["book", "document"]
@@ -20,3 +14,19 @@ writes = ["media.db (media, candidates, texts, art, ids, ratings, names, conflic
 never = ["guess between candidates", "overwrite a source's data", "tag from an unresolved decision", "replace the file's own facts without independent evidence", "silently drop an item", "merge entries on a fingerprint hint"]
 hands_off = ["sammy: any step still ambiguous (parse, lookup, match, refine, conflict) via the Escalation trait; decisions recorded with provenance", "user: needs_flags items (--year, --imdb)"]
 command = "jack [--capabilities] [--tmdb ID | --thetvdb ID | --imdb ID | --youtube ID | --x ID | --name NAME --year YEAR] PATH..."
+
+[[success_checks]]
+check = "every file processed gets exactly one entry handed to Daniel"
+test = "jack/src/run.rs::nothing_dropped_everything_explained"
+
+[[success_checks]]
+check = "no guesses: an unsettled choice is stored as not_identified with all candidates and a reason"
+test = "jack/src/decide.rs::acts_only_on_sure_information"
+
+[[success_checks]]
+check = "only an id (from the file or a confirmed match) moves an entry to complete"
+test = "jack/src/stage.rs::only_an_id_reaches_complete"
+
+[[success_checks]]
+check = "every source answer is kept as a candidate, never overwritten"
+test = "jack/src/candidates.rs::whole_lists_kept"

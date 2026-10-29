@@ -6,4 +6,4 @@ description = "Kate, the image conversion windup (stub)"
 license = "MIT"
 
 [dependencies]
-windups = { path = "../windups" }
+windups.workspace = true

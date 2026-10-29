@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = [
+    "windups", "jack", "daniel", "walter", "larry", "ruth", "tom", "mary", "kate",
+    "sammy", "julie", "margaret", "oliver", "ben", "rover",
+]
+
+[workspace.package]
+license = "MIT"
+repository = "https://github.com/am517/windups"
+
+[workspace.dependencies]
+windups = { path = "windups" }
+daniel = { path = "daniel" }
+larry = { path = "larry" }
+ruth = { path = "ruth" }

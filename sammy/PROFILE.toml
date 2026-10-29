@@ -2,9 +2,13 @@ name = "sammy"
 role = "judgment"
 summary = "Sammy is the thinking windup: when evidence alone can't settle it (ambiguous candidates, conflicting sources), Sammy weighs it and decides. A resource like any other: entries wait for him."
 purpose = "Decide well when evidence alone can't."
-success_checks = [
-  "every decision records the options, the choice and why",
-  "when Sammy can't decide either, the entry stays open rather than guessed",
-]
 status = "stub"
 command = "sammy --capabilities"
+
+[[success_checks]]
+check = "every decision records the options, the choice and why"
+pending = "stub: no test yet"
+
+[[success_checks]]
+check = "when Sammy can't decide either, the entry stays open rather than guessed"
+pending = "stub: no test yet"

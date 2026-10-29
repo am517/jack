@@ -1,7 +1,7 @@
 # windups
 
 The main Windups repository: the standard, the shared database schema, shared settings and
-anything every windup uses. Each windup lives in its own repo (first: [Jack](https://github.com/am517/jack)).
+anything every windup uses. Each windup lives in its own folder of the windups monorepo (first: [Jack](../jack)).
 
 - [WINDUPS.md](WINDUPS.md): the rules every windup follows
 - [schema/](schema/): the shared database (`~/.local/share/windups/media.db`)

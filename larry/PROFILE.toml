@@ -3,12 +3,19 @@ name = "larry"
 role = "hashing"
 summary = "Larry fingerprints files: an exact BLAKE3 hash (partial first, full later) to re-find renamed or moved files, and a look-alike fingerprint that only proposes possible duplicates."
 purpose = "Recognise files by their content, so renamed, moved or copied files are found again."
-success_checks = [
-  "the same bytes always give the same hash; different bytes a different one",
-  "partial hashing is the default; full hashing on request",
-  "perceptual fingerprints only propose; they never merge",
-]
 status = "stub"
 reads = ["media files"]
 writes = ["file_hash and file_fingerprint fields (Daniel stores them)", "possible_same proposals"]
 never = ["merge entries", "decide what a file is"]
+
+[[success_checks]]
+check = "the same bytes always give the same hash; different bytes a different one"
+test = "larry/src/hash.rs::whole_for_small_partial_for_big_same_bytes_same_hash"
+
+[[success_checks]]
+check = "partial hashing is the default; full hashing on request"
+test = "larry/src/lib.rs::defaults_partial_first_and_describe"
+
+[[success_checks]]
+check = "perceptual fingerprints only propose; they never merge"
+test = "larry/src/fingerprint.rs::close_match_is_only_a_proposal"

@@ -316,9 +316,13 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
 
 - **Every PROFILE.toml has a `purpose`** (one sentence: why the windup exists) and **`success_checks`**
   (a short list of concrete, testable statements, e.g. Jack: every file gets an entry; no guesses; only
-  ids confirm identity). A windup is judged by its own checks.
+  ids confirm identity). A windup is judged by its own checks, and **every check is a must-pass test**: each
+  `[[success_checks]]` entry names its test (`test = "crate/src/file.rs::test_fn"`) or, for stubs only,
+  is marked `pending`. `windups/tests/profiles.rs` fails the build when a check names no existing test.
 - **Rover** (stub) refines other windups, strictly bound by each windup's purpose and success checks:
   he proposes changes, tests them against those checks, and never applies an unreviewed change.
+  His universal rules: *leave it as you found it or better*; *better, faster, stronger* (never regress
+  a windup's purpose, its tests or the rules).
 - **`walter pending` is read-only**: it lists scheduled returns and nothing else (no patrol, no
   capability discovery, no Jack). Walter patrols only when called to patrol (`patrol` or `note`).
 - **One repo**: all windups live in one Cargo workspace (github.com/am517/windups), one folder each.

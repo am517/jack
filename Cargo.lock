@@ -92,6 +92,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "ben"
+version = "0.1.0"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -205,6 +209,7 @@ dependencies = [
  "ruth",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
  "windups",
 ]
@@ -477,12 +482,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "julie"
+version = "0.1.0"
+
+[[package]]
+name = "kate"
+version = "0.1.0"
+dependencies = [
+ "windups",
+]
+
+[[package]]
 name = "larry"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "rusqlite",
  "serde",
+ "tempfile",
  "toml",
  "windups",
 ]
@@ -523,6 +540,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "margaret"
+version = "0.1.0"
+
+[[package]]
+name = "mary"
+version = "0.1.0"
+dependencies = [
+ "windups",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -537,6 +565,10 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "oliver"
+version = "0.1.0"
 
 [[package]]
 name = "once_cell"
@@ -639,6 +671,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rover"
+version = "0.1.0"
+
+[[package]]
 name = "rpassword"
 version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -736,6 +772,10 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "sammy"
+version = "0.1.0"
 
 [[package]]
 name = "serde"
@@ -888,6 +928,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
+name = "tom"
+version = "0.1.0"
+dependencies = [
+ "windups",
+]
+
+[[package]]
 name = "toml"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1011,6 +1058,17 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "walter"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "toml",
+ "windups",
 ]
 
 [[package]]
@@ -1141,6 +1199,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
 ]
 

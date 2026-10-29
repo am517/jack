@@ -9,7 +9,7 @@ license = "MIT"
 rusqlite = "0.32"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-windups = { path = "../windups" }
+windups.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
