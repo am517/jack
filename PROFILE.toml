@@ -1,0 +1,5 @@
+name = "julie"
+role = "verification"
+summary = "Julie verifies entries against evidence (ids, the file's own facts, independent sources) and calls Sammy when judgment is needed. Verifying and thinking are separate."
+status = "stub"
+command = "julie --capabilities"
