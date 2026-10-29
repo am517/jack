@@ -1,0 +1,76 @@
+name: debs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package (e.g. v0.2.0)"
+        required: true
+      dry_run:
+        description: "Build only, don't upload"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  jack:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Toolchain, zig and cargo tools
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          pip install ziglang
+          cargo install --locked cargo-zigbuild cargo-deb
+      - name: Test
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo test --locked -p jack
+      - name: Build (glibc 2.31, works on Raspberry Pi OS bookworm, Debian 11+, Ubuntu 20.04+)
+        run: cargo zigbuild --locked --release -p jack --target ${{ matrix.target }}.2.31
+      - name: Package
+        run: |
+          mkdir -p out
+          cargo deb -p jack --no-build --no-strip --target ${{ matrix.target }} -o out/
+          dpkg-deb -I out/*.deb
+      - name: Check the amd64 package installs and runs
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo dpkg -i out/*.deb
+          jack --version
+          jack --capabilities | grep -q '^name = "jack"'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.target }}
+          path: out/*.deb
+
+  release:
+    needs: jack
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          merge-multiple: true
+          path: out
+      - name: Checksums
+        run: cd out && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
+      - name: Attach to the release
+        if: github.event_name == 'release' || !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" out/*.deb out/SHA256SUMS --clobber -R "$GITHUB_REPOSITORY"
