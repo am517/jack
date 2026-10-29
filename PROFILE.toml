@@ -1,0 +1,6 @@
+name = "tom"
+role = "vectors"
+summary = "Tom embeds texts (Mary's summary first, else the description) as vectors for meaning search."
+status = "stub"
+reads = ["summaries", "descriptions"]
+writes = ["vectors (via Daniel)"]
