@@ -2,6 +2,12 @@
 name = "larry"
 role = "hashing"
 summary = "Larry fingerprints files: an exact BLAKE3 hash (partial first, full later) to re-find renamed or moved files, and a look-alike fingerprint that only proposes possible duplicates."
+purpose = "Recognise files by their content, so renamed, moved or copied files are found again."
+success_checks = [
+  "the same bytes always give the same hash; different bytes a different one",
+  "partial hashing is the default; full hashing on request",
+  "perceptual fingerprints only propose; they never merge",
+]
 status = "stub"
 reads = ["media files"]
 writes = ["file_hash and file_fingerprint fields (Daniel stores them)", "possible_same proposals"]
