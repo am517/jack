@@ -1,6 +1,12 @@
 name = "ruth"
 role = "references"
 summary = "Ruth builds the APA 7 work reference and work key from gathered facts, using original-language titles and the original release; provisional whenever it can't be fully built."
+purpose = "Name each work in one standard way, so versions of the same work group together."
+success_checks = [
+  "the reference follows APA 7 and uses original-language titles and the original release",
+  "a reference missing anything it needs is marked provisional and lists what is missing",
+  "the same facts always give the same work key",
+]
 status = "library (real code, called by Daniel); no CLI yet"
 reads = ["an entry's facts"]
 writes = ["work reference, key, provisional flag, what is missing"]
