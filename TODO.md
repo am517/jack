@@ -44,3 +44,5 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - Larry: a full-hash pass over partial-hashed files as resources permit.
 - Larry: real perceptual fingerprint, aligning by audio first, then frames.
 - Tom, Mary, Kate: real implementations (Kate converts Jack's art).
+
+- Later: other windups may also call Walter (e.g. when a new source is added, or after meta-analysis).
