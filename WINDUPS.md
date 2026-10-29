@@ -75,3 +75,19 @@ Windups never best-guess or try to be "smart". A windup acts only on sure decisi
 (e.g. name + year, an id like IMDb/TMDB/TheTVDB, a source URL or yt-dlp info.json, or an unambiguous exact match).
 Otherwise it plainly says "not possible with the available information", keeps everything (all candidates and raw
 data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM windup, through a resolver hook.
+
+## Profiles (Adam, 2026-10-28)
+- Every windup has `PROFILE.toml` in its repo root: the source of truth for who it is and what it does
+  (name, role, summary, kinds, sources, reads, writes, never, hands_off, command).
+- `windups-<name> --capabilities` prints exactly that file (compiled in with `include_str!`).
+- It is copied into media.db's `windups` table and embedded (table `embeddings`, owner `windup`)
+  so Margaret and other windups can find the right windup by meaning.
+
+## Unresolved, names and conflicts (schema v2, 2026-10-28)
+- Unresolved items live in `unresolved` with a reason from `unresolved_reasons`. Time-based reasons
+  (no_match, ambiguous, source_error) are retried after `unresolved_retry_days` (default 7) by a future
+  tidy-up windup; resource-based reasons (conflict, needs_llm_windup) wait for the windup that can settle them.
+- Every source's name is kept untouched in `source_names`; `display_name` is the user's own name
+  (auto-filled from a source name, `display_name_set_by` = `auto:<source>` or `user`).
+- When sources about the same work disagree, a `conflicts` row records all values. Nothing is settled by assumption.
+- A file's own embedded metadata is read first and always kept as source `embedded`.

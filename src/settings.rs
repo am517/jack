@@ -10,6 +10,8 @@ pub struct Settings {
     pub raw_dir: String,
     pub raw_max_age_days: u64,
     pub allow_remote_metadata: bool,
+    /// Time-based unresolved reasons are retried after this many days (by a tidy-up windup).
+    pub unresolved_retry_days: u64,
 }
 
 impl Default for Settings {
@@ -19,6 +21,7 @@ impl Default for Settings {
             raw_dir: "~/.local/share/windups/raw".into(),
             raw_max_age_days: 0,
             allow_remote_metadata: false,
+            unresolved_retry_days: 7,
         }
     }
 }

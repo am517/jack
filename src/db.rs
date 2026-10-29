@@ -3,7 +3,10 @@ use rusqlite::Connection;
 use std::path::Path;
 
 /// Ordered migrations; index + 1 is the schema version (PRAGMA user_version).
-const MIGRATIONS: &[&str] = &[include_str!("../schema/media.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../schema/media.sql"),
+    include_str!("../schema/002_unresolved_names_conflicts_vectors.sql"),
+];
 
 pub fn latest_version() -> i64 {
     MIGRATIONS.len() as i64
@@ -50,6 +53,22 @@ mod tests {
         assert_eq!(version(&c).unwrap(), latest_version());
         let n: i64 = c.query_row("SELECT count(*) FROM sqlite_master WHERE name='media'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
+        let n: i64 = c.query_row("SELECT count(*) FROM unresolved_reasons", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 5);
+    }
+    #[test]
+    fn v1_database_upgrades() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("media.db");
+        {
+            let c = rusqlite::Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.execute("INSERT INTO media(kind, title) VALUES ('movie', 'Old')", []).unwrap();
+        }
+        let c = open(&p).unwrap();
+        assert_eq!(version(&c).unwrap(), 2);
+        let t: String = c.query_row("SELECT title FROM media", [], |r| r.get(0)).unwrap();
+        assert_eq!(t, "Old");
     }
     #[test]
     fn reopen_is_idempotent() {

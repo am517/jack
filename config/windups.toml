@@ -18,3 +18,10 @@ raw_max_age_days = 0
 
 # Allow sending metadata (never media files) to a remote API, e.g. a remote LLM for Sammy.
 allow_remote_metadata = false
+
+
+# ── Unresolved ────────────────────────────────────────────────────
+
+# Time-based reasons (no_match, ambiguous, source_error) are retried after this many days.
+# Resource-based reasons (conflict, needs_llm_windup) wait for the windup that can settle them.
+unresolved_retry_days = 7
