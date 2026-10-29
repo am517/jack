@@ -1,0 +1,27 @@
+# Settings shared by all windups. Copy to ~/.config/windups/windups.toml.
+# A windup's own config (~/.config/windups/<name>/config.toml) can override any of these.
+
+
+# ── Database ──────────────────────────────────────────────────────
+
+# The shared database (the source of truth).
+database = "~/.local/share/windups/media.db"
+
+# Raw downloads (unused art, API responses, alternative results).
+raw_dir = "~/.local/share/windups/raw"
+
+# Keep raw downloads this many days (0 = forever).
+raw_max_age_days = 0
+
+
+# ── Privacy ───────────────────────────────────────────────────────
+
+# Allow sending metadata (never media files) to a remote API, e.g. a remote LLM for Sammy.
+allow_remote_metadata = false
+
+
+# ── Unresolved ────────────────────────────────────────────────────
+
+# Time-based reasons (no_match, ambiguous, source_error) are retried after this many days.
+# Resource-based reasons (conflict, needs_llm_windup) wait for the windup that can settle them.
+unresolved_retry_days = 7

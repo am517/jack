@@ -1,0 +1,324 @@
+# The Windups standard (draft 1, 2026-10-27)
+
+## Origin
+
+The windups come from Adam's view of the mind as a hive of many small selves, each with its own
+identity and drive, negotiating influence and woven together into one.
+
+A windup is a small program that does one job well. Windups call each other; a "super" windup
+orchestrates others. This file is the contract. Anything shared lives in this repo.
+
+## Cast list
+
+- **Jack**: fetches and verifies metadata for a file (gathers facts), hands one entry to Daniel.
+- **Daniel**: the database; takes handoffs, asks Larry and Ruth, stores, calls Walter.
+- **Walter**: patrol; called by windups, schedules returns and calls windups back, then exits.
+- **Larry**: hashing: exact BLAKE3 (partial first, full later) and the perceptual fingerprint.
+- **Tom**: vectors/embeddings for meaning search.
+- **Mary**: summaries (before Tom only).
+- **Kate**: image conversion (JPEG to embed, JPEG XL to archive).
+- **Sammy**: judgment, when evidence alone can't decide.
+- **Julie**: verification against evidence; calls Sammy when judgment is needed.
+- **Ruth**: builds the APA 7 work reference and work key.
+- **Margaret**: directory; knows every windup's capabilities.
+- **Oliver**: matchmaker; breaks requests down and teams windups up.
+- **Ben**: rebuilds the windups for new platforms.
+- **Rover**: refines other windups, bound by each one's purpose and success checks; proposes and tests, never applies unreviewed.
+
+## Roster
+
+| Windup | Job | Status |
+|---|---|---|
+| Jack | fetches and verifies metadata for a file, hands one complete entry to Daniel | building |
+| Lauren | tags and embeds (writes metadata/art into files) | later |
+| Sammy | judgment: decides when evidence alone can't (a resource entries wait for) | stub crate |
+| Julie | verification: checks entries against evidence, calls Sammy when judgment is needed | stub crate |
+| Ruth | references: APA 7 work reference and key from gathered facts | library (real code) |
+| Ben | builds: rebuilds the windups for new platforms | stub crate |
+| Rover | refining: proposes and tests improvements to other windups, within their profiles; never applies unreviewed | stub crate |
+| Daniel | database manager: populates and keeps everything (an archive-ophile); takes Jack's handoff | own crate (real store code) |
+| Larry | hashing: exact (BLAKE3, partial first, full later) and perceptual | stub crate (hashing works, perceptual placeholder) |
+| Tom | vectors/embeddings for meaning search | stub crate |
+| Mary | summaries; runs before Tom only, never blocks Larry | stub crate |
+| Kate | image conversion: JPEG to embed, JPEG XL to archive | stub crate |
+| Walter | patrol: watches the database for unfinished work and calls windups back | working |
+| Steve | finds local information in the database (search) | later |
+| Sally | organizes files (rename, move, sort) | later |
+| Tammy | super windup: ingests new media by orchestrating the others | later |
+| Oliver | manager/matchmaker: breaks down messy requests, decides which windups team up, spots gaps needing a new windup (revisit once Margaret exists; fold in if redundant) | much later |
+| Margaret | receptionist/directory: knows every windup and its capabilities, points callers to the right one (until needed, PATH + `--capabilities` is enough) | later |
+
+## Rules
+
+1. **One job per windup.** If a task has two jobs, it is two windups.
+2. **Every windup is its own repo** (`am517/<name>`), Homebrew formula `windups-<name>`, MIT.
+3. **One windup at a time.** Jack and this repo first; a new windup starts only when the current one is complete.
+4. **Standalone.** Every windup works with no other windup installed, using a sane default when a
+   helper can't be found (Jack without Sammy: longest summary wins; Tammy: "I'm sorry, I can't figure
+   this out right now"). Helpers make results better, never required.
+5. **All windups can call all windups.** A windup knows who to talk to without being told (see
+   docs/communication.md). No user pipes (`a | b | c`) are needed or expected.
+6. **The database is the source of truth.** All metadata enters `media.db`, then gets written to the
+   file. **No sidecars**: a windup never reads `<file>.*` side files (an explicit `--download-only`
+   export is the user's business; nothing reads it back).
+7. **Efficiency above all**, especially in inter-windup communication.
+8. **Never err on the side of simple; it's OK to err on the side of later.** When we build a windup we
+   build it as well as we can. Design so later features (e.g. complex search) aren't blocked.
+9. **Privacy: nothing leaves the machine unless the user opts in** (`allow_remote_metadata`).
+   Fetching from public databases is a lookup, not sharing; sending our metadata to an API (e.g. a
+   remote LLM) is sharing.
+10. **Free services only**, where "free" includes a free tier (OMDb is fine).
+11. **Secrets** never in git, logs, dry runs, errors or Debug output; masked when shown.
+
+## Files and settings
+
+| What | Where |
+|---|---|
+| Windup config | `~/.config/windups/<name>/config.toml` (`--config` overrides) |
+| Shared settings | `~/.config/windups/windups.toml` (template: config/windups.toml) |
+| Shared database | `~/.local/share/windups/media.db` (schema/) |
+| Raw downloads (art, API responses) | `~/.local/share/windups/raw/`, pruned per `raw_max_age_days` |
+
+- Every tweakable is a config value, never hard-coded. Config comments are short and for users.
+- Precedence: flags > windup config > shared settings > built-in defaults.
+- Every on/off flag has a `--no-X` form; `--set` saves flags into the config.
+
+## Command line
+
+- `--help`, `--version`, `--config <path>`, `--dry-run` (changes nothing, shows everything), `--set`.
+- `--print` / `--print-format json` for humans and scripts (stdout = data, stderr = report).
+- Exit codes: 0 all OK, 1 some items failed, 2 usage or config error.
+
+## Quality bar
+
+- Rust 2024, `cargo test` and `cargo clippy --all-targets -- -D warnings` clean before every commit.
+- Tests use fakes for the network; integration tests skip when external tools are missing.
+- macOS first, Linux supported, Windows not a goal. File/folder names max 255 (characters on macOS, bytes on Linux).
+
+## Design rules (Adam, 2026-10-28)
+- **Treat each windup like a person.** When the right behavior is unclear, ask what a person would do. Example: with no database reachable, Jack writes a JSON next to the media (like jotting a note) — the one allowed exception to "no sidecars", and it is imported into media.db once available.
+- **Modular.** One file does one thing (within reason); small focused modules.
+
+Naming: traditional American English names for now (Adam, 2026-10-28).
+
+## Core rule: no guessing (Adam, 2026-10-28)
+Windups never best-guess or try to be "smart". A windup acts only on sure decisions, when it has enough information
+(e.g. name + year, an id like IMDb/TMDB/TheTVDB, a source URL or yt-dlp info.json, or an unambiguous exact match).
+Otherwise it plainly says "not possible with the available information", keeps everything (all candidates and raw
+data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM windup, through a resolver hook.
+
+## Profiles (Adam, 2026-10-28)
+- Every windup has `PROFILE.toml` in its repo root: the source of truth for who it is and what it does
+  (name, role, summary, kinds, sources, reads, writes, never, hands_off, command).
+- `windups-<name> --capabilities` prints exactly that file (compiled in with `include_str!`).
+- It is copied into media.db's `windups` table and embedded (table `embeddings`, owner `windup`)
+  so Margaret and other windups can find the right windup by meaning.
+
+## Unresolved, names and conflicts (schema v2, 2026-10-28)
+- Unresolved items live in `unresolved` with a reason from `unresolved_reasons`. Time-based reasons
+  (no_match, ambiguous, source_error) are retried after `unresolved_retry_days` (default 7) by a future
+  tidy-up windup; resource-based reasons (conflict, needs_llm_windup) wait for the windup that can settle them.
+- Every source's name is kept untouched in `source_names`; `display_name` is the user's own name
+  (auto-filled from a source name, `display_name_set_by` = `auto:<source>` or `user`).
+- When sources about the same work disagree, a `conflicts` row records all values. Nothing is settled by assumption.
+- A file's own embedded metadata is read first and always kept as source `embedded`.
+  It is the truth for facts, not wording. A source's value replaces it only when it says the same
+  thing written differently (case, spacing, `.`/`_`/`-`), or when evidence confirms the same
+  entity. Only an id is proof (one shared with the file, or one the user gave: --imdb/--tmdb/--thetvdb).
+  The user's own word (--name with --year, or their channel mapping) settles names but not identity.
+  A matching name or year is a strong hint for checking, never confirmation. Similar wording
+  is never proof ("Joe Rogan" vs "The Joe Rogan Experience"). Without evidence the file's value stays,
+  the file is still tagged with it, a conflict is recorded and the item stays open (`needs_flags`, or
+  `needs_llm_windup` for exact facts). Exact facts (year, date, season, episode) are never replaced.
+  Originals are always kept.
+- Social videos with a matched show get the show as their own parent media row.
+
+## The guiding test
+
+Act like a smart intern from a foreign country: capable with resources, but lacking shared cultural
+knowledge. Make no assumptions. When the information is not enough, skip the step or mark it for
+research; never guess.
+
+## Search: one call, the whole list
+
+One API call per source. A search returns a list in that one call; the whole list is stored as
+candidates (source `<provider>:search`), not just the top hit. A title without a year is a hit only when
+exactly one normalized-exact match exists across all returned lists and the sources agree (same year);
+otherwise the item is unresolved: `ambiguous` (one list has several exact matches) or `needs_flags`
+(sources disagree, or the details fetched are for a different hit), with a hint such as `--year`/`--imdb`.
+
+## Keep everything
+
+Every item is stored, even when incomplete: failed lookups, unreadable names and unresolved matches get
+an entry marked incomplete (an open `unresolved` row with its reason) and all candidates. A windup never
+silently drops an item. Each one is reported to the user as it happens and again at the end of the run,
+with the reason and what would help. Without an LLM, the text comes from static templates in config
+(`[explain]` in jack.toml) behind a swappable `Explainer` (one file), so Sammy can later explain better.
+
+## Escalation at every step
+
+At every step (parse, lookup, match, refine, conflict, ...) a windup 1) tries a deterministic,
+unambiguous answer; 2) if still ambiguous, hands everything it has to an `Escalation`: step kind plus
+full context (reason, detail, merged metadata, every source answer and search hit, the file's own tags)
+in; a decision (values plus a note) or a deferral out. Decisions are recorded with provenance in the
+`decisions` table (source = `sammy`, step, timestamp, values, note). Until Sammy exists the stub
+`NoSammy` always defers, so the fallback is: keep the item as incomplete and explain it with the static
+template. Reason `needs_flags` (schema v3) is for items only the user can settle with a flag.
+
+## Review pass (optional)
+
+After a run, if `[review] enabled` and a reviewer is available, each configured field is reviewed
+across all items in chunks, with minimal context (e.g. title + year beside a description). The reviewer
+(Sammy, `Reviewer` trait; stub `NoReview` is never available) returns flags, not rewrites. Flags are
+logged with provenance (source, step=review, time) and reported as open items (`review_flag`); any
+change still goes through the sure-or-log rules above.
+
+## Lifecycle: identification is a process, not a goal (schema v4)
+
+Every file gets an entry, even when nothing could be identified, and entries walk stages over time:
+
+| stage | meaning |
+|---|---|
+| `undetermined` | file purgatory: only the file's and the user's own values (lookup failed or not done) |
+| `not_identified` | looked up, but no answer could be settled on (the open `unresolved` row says why) |
+| `unverified` | matched by strong hints (name, year, user's --name/--year, channel mapping), not by an id |
+| `incomplete` | identified by an id; something is still open (a conflict, a needed flag) |
+| `complete` | identified by an id; nothing open |
+| `merged` | folded into another entry (`merged_into`); final |
+
+- Stages and allowed moves are rows (`lifecycle_states`, `lifecycle_transitions`): add a stage without
+  code. Any working stage may move to any other (an id can turn out wrong), or be merged; merged is final.
+- Every move is kept in `status_history` (from, to, actor, reason, time).
+- Entries are never deleted (a trigger refuses it) and ids are never reused. An entry is identified in
+  place (a re-run of the same file updates the same id) or merged into another: files and ids move over,
+  the old entry stays with `merged_into` set, and `merges` records who, why and when. Lookups follow
+  `merged_into` to the entry that stands now.
+- `unresolved` stays the list of open questions (why, and what would help); the stage says where the
+  entry is. Migration v4 put existing entries on `not_identified` (open unresolved) or `unverified`.
+- A run counts entries by stage. Incomplete entries are kept, not failures; a failure is something a
+  windup could not do at all (e.g. could not write a tag).
+- Year tolerance (`[matching] year_tolerance`, default 1) lets sources a year apart agree while
+  matching (release dates differ by country). It is a hint only, never evidence.
+
+## Completeness, the user's word, and finding the same thing again (schema v5)
+
+**Complete** means: id-verified, nothing open, and every *required* field for its media kind present.
+The lists live in config (`[completeness]` in jack.toml; defaults: description required everywhere it
+applies, cast optional). Otherwise the entry is *incomplete* and `missing_fields` lists what's absent.
+
+**The user's word.** `--name`/`--year` and a channel mapping are used, but the entry stays *unverified*
+(only an id proves identity) and a decision with source `user_asserted` records it, for Sammy or the
+user to review later.
+
+**Same file, same work, maybe the same thing.** Three different questions, three answers:
+
+| Layer | Stored in | Means | Acts on its own? |
+|---|---|---|---|
+| Exact hash (BLAKE3) | `files.hash` (`b3:` whole file) | identical bytes: **proof** | yes: a file whose old path is gone is re-found under its new path, same entry (also undetermined ones) |
+| Perceptual fingerprint | `files.fingerprint` | same picture/sound after re-encode, resize, crop, rotation, aspect change: **hint** | no: opens a `possible_same` row in `proposals`; never merges |
+| Work key | `works`, `media.work_key` | different versions/encodes of the same work | groups only |
+
+- *Hash mode.* `mode = "full"` (default) hashes the whole file; BLAKE3 runs at disk speed, so the cost is
+  one read per new or changed file. `mode = "partial"` (`b3p:`: size + start/middle/end chunks) reads a
+  few MiB instead — near-certain for video, but a hint, not proof. A copy whose original still exists is
+  its own file, not a re-find.
+- *Fingerprint.* Behind the `Fingerprinter` trait (jack `fingerprint.rs`); thresholds in `[fingerprint]`
+  (`frames`, `audio`, `max_distance`). The shipped `NoFingerprint` stub produces nothing; off by default.
+  Proposals stay `open` until the user or Sammy sets `accepted`/`rejected`; a merge is a separate act.
+- *Work key.* `wk1:` + BLAKE3 of an APA 7-style reference, lower-cased with punctuation and spacing
+  normalized: film `Title. (Year). [Film].`; episode `Show (Season s, Episode e) [TV series episode]. (Year).`;
+  series `Show. (Year). [TV series].`; online video `Channel. (Date). Title [Video]. Site.`
+  Known ids (IMDb, TMDB, TheTVDB, TVmaze, Wikidata, YouTube, X) are stored beside the key in `works.ids`,
+  not inside it, so a newly learned id doesn't change the key. Only identified entries get one.
+
+## Finishing well: nothing incomplete is forgotten (schema v6)
+
+Windups care about finishing. They may pause, or accept a partial answer for now, but they always
+come back until the entry is truly complete. Every entry that isn't `complete` has a row in `returns`:
+
+- **Time-based:** `next_retry_at` (UTC), from `[retry] backoff_hours` by attempt (default 1 h, 1 day,
+  1 week, then monthly). With neither a time nor a resource configured it still returns in a day.
+- **Resource-based:** `waiting_for` names a capability (`[retry.wait_for]` per stage; default
+  `not_identified = "sammy"`; a provider name or `new_source` also work). When it appears, matching
+  items become due at once (`returns::wake`). Walter wakes them from what's present now:
+  registered windups (the `windups` table, filled from `--capabilities` profiles) and configured
+  providers; `--wake CAP` names one by hand.
+- Whichever comes first. Reaching `complete` (or being merged away) clears the return.
+
+CLI: now Walter's, see below (`walter pending`, `walter patrol`). Jack no longer schedules.
+
+## Round 6 (Adam, 2026-10-28): ids, references, and who does what (schema v7)
+
+**Ids.** Every entry has one permanent local id (`media.id`), never changed or reused. Every work has
+one permanent `works.id`; its key and reference may improve, the id never changes. Service ids (imdb,
+tmdb, tvdb, youtube, …) sit beside them: `external_ids` per entry, `work_ids` per work. A shared
+service id finds the same work; two works sharing ids become a `same_work` proposal, never a merge.
+
+**Work reference.** Built from the most original information: original-language title and original
+release, not translations; includes the episode title when known (`Title (Season s, Episode e) [TV
+series episode]. In Show. (Year).`). Original title and language are stored when sources give them;
+without an original language the reference is marked `provisional` and is upgraded later (never
+downgraded). Online videos are never provisional.
+
+**Architecture.** Jack ONLY fetches and verifies metadata for a file and hands one complete entry
+(`windups::handoff::Handoff`) to Daniel (`windups::handoff::Daniel`). Processing lives elsewhere:
+- **Daniel** stores it (own crate since round 7).
+- **Larry** hashes: exact BLAKE3, `partial` by default (head + tail + size), full later as resources
+  permit; and the perceptual fingerprint (still a placeholder). Daniel calls Larry before storing.
+- **Mary** summarises, before Tom only. **Tom** embeds. **Kate** converts
+  images (JPEG embedded, JPEG XL archive). All stubs with a trait and a test.
+- **Walter** patrols (below).
+
+**Look-alike fingerprint (note).** Releases differ in intros, jingles and cuts, so align videos
+first, by audio preferably (cross-correlate audio fingerprints to find the offset), then compare
+frames at matching times. Still a hint only: it proposes, never merges.
+
+**Times** are UTC everywhere.
+
+**No timers, only windups call windups.** No routines, cron or system timers. Walter examines entry
+state (stage, latest reason, `last_checked`, its return) and decides when to call Jack again:
+- `walter pending` only lists unfinished work (read-only; see Round 9): `#id path [stage] reason — next: <time> UTC or when X appears (attempts n)`.
+- `walter patrol` discovers capabilities (windup profiles via `--capabilities`; their `sources`), wakes
+  items waiting for anything new (a new source also wakes `new_source`), schedules returns, then calls
+  Jack with the files of what is due (`--all` for everything pending; `--wake CAP` by hand).
+- A return reschedules (with the next back-off) whenever the entry's `last_checked` differs from the
+  one it was scheduled against; Jack stamps `last_checked` on every save, Walter after each call.
+- Jack's `pending`/`retry` commands are gone; that logic lives in Walter.
+
+## Round 7 (Adam, 2026-10-28): who calls whom
+
+- **No daemon, no timers, portable.** Windups call Walter; he runs on the call, then exits.
+- **Daniel is his own crate** (store code moved from Jack). Jack calls him only through
+  `windups::handoff::Daniel`, passing the disagreements he found between sources (`conflicts`).
+- **Ruth builds references** (code moved from Jack); Jack only gathers facts. A reference is
+  provisional whenever it can't be fully built: a missing original title (or original show/episode
+  title), original language, or episode title; `missing` lists what.
+- **Verifying and thinking are separate.** Julie verifies against evidence; Sammy judges, and is a
+  resource like any other. Waits name the windup waited on: `unverified` waits for `julie`,
+  `not_identified` for `sammy`, `undetermined`/`incomplete` for `new_source`.
+- **Mary** precedes Tom only; she never blocks Larry.
+- Stubs (profile, README, `--capabilities`): Sammy, Julie, Margaret, Oliver, Ben; and Tom, Mary, Kate.
+
+## Round 8 (Adam, 2026-10-28): Walter the data freak, Daniel the gatekeeper
+
+- **Walter patrols the whole database whenever he is called, for any reason**: `patrol`, `note` (the
+  same). (Round 9: `pending` no longer patrols.) Each patrol is stamped as `last_patrol` in
+  `windup_state` (schema v8). Anyone may call him.
+- **Daniel alerts Walter by default, only when it matters.** He counts changes since Walter's last
+  patrol and their importance (`[importance]` weights: new entry 3, stage change 2, update 1) and
+  calls `walter patrol --db DB` when one threshold in `[walter]` is reached: `max_changes` (25),
+  `importance` (10) or `max_hours` (24) since the last patrol. A patrol by anyone restarts the count.
+- **Loop guard.** Walter runs Jack as `jack --caller walter`; Jack carries `caller` in the handoff and
+  Daniel counts that work but never alerts Walter about it.
+- English film references stay provisional until a source gives the original title (confirmed).
+
+## Round 9 (Adam, 2026-10-28): profiles with purpose, Rover, one repo
+
+- **Every PROFILE.toml has a `purpose`** (one sentence: why the windup exists) and **`success_checks`**
+  (a short list of concrete, testable statements, e.g. Jack: every file gets an entry; no guesses; only
+  ids confirm identity). A windup is judged by its own checks.
+- **Rover** (stub) refines other windups, strictly bound by each windup's purpose and success checks:
+  he proposes changes, tests them against those checks, and never applies an unreviewed change.
+- **`walter pending` is read-only**: it lists scheduled returns and nothing else (no patrol, no
+  capability discovery, no Jack). Walter patrols only when called to patrol (`patrol` or `note`).
+- **One repo**: all windups live in one Cargo workspace (github.com/am517/windups), one folder each.
