@@ -1,0 +1,6 @@
+name = "kate"
+role = "images"
+summary = "Kate converts artwork: JPEG for embedding in media files, JPEG XL for the archive."
+status = "stub"
+reads = ["artwork files"]
+writes = ["converted images"]
