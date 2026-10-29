@@ -44,15 +44,19 @@ pub fn describe(
     f: &dyn fingerprint::Fingerprinter,
 ) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
-    if cfg.hash.enabled {
-        if let Ok(h) = hash::file_hash(path, &cfg.hash) {
-            m.insert("file_hash".into(), h);
-        }
+    let hash = cfg
+        .hash
+        .enabled
+        .then(|| hash::file_hash(path, &cfg.hash).ok());
+    if let Some(h) = hash.flatten() {
+        m.insert("file_hash".into(), h);
     }
-    if cfg.fingerprint.enabled {
-        if let Some(fp) = f.fingerprint(path, &cfg.fingerprint) {
-            m.insert("file_fingerprint".into(), fp);
-        }
+    let fp = cfg
+        .fingerprint
+        .enabled
+        .then(|| f.fingerprint(path, &cfg.fingerprint));
+    if let Some(fp) = fp.flatten() {
+        m.insert("file_fingerprint".into(), fp);
     }
     m
 }

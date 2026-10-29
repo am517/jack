@@ -1,6 +1,6 @@
 [package]
 name = "jack"
-version = "0.1.7"
+version = "0.2.0"
 edition = "2024"
 description = "Tag and sort movie and TV files"
 license = "MIT"
@@ -24,3 +24,21 @@ daniel.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.deb]
+name = "windups-jack"
+maintainer = "Adam Moore <am517@users.noreply.github.com>"
+copyright = "2026, Adam Moore"
+license-file = ["../LICENSE", "3"]
+extended-description = "Jack, from the windups: reads a media file's own label, looks it up in online databases (TMDB, TheTVDB, OMDb), then tags and sorts movie and TV files."
+section = "video"
+priority = "optional"
+depends = "libc6 (>= 2.31)"
+recommends = "atomicparsley, libimage-exiftool-perl, mkvtoolnix"
+# Debian's own `jack` package (a CD ripper) also installs /usr/bin/jack
+conflicts = "jack"
+assets = [
+    ["target/release/jack", "usr/bin/", "755"],
+    ["config/jack.toml", "usr/share/windups-jack/config.toml.example", "644"],
+    ["README.md", "usr/share/doc/windups-jack/README.md", "644"],
+]

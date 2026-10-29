@@ -13,6 +13,8 @@ fn to_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
+// chunks_exact, not as_chunks (Rust 1.88+), so older distro toolchains still build
+#[allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 fn from_blob(b: &[u8]) -> Vec<f32> {
     b.chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))

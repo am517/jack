@@ -1,10 +1,10 @@
-class WindupsJack < Formula
+class Jack < Formula
   desc "Tag and sort movie and TV files using TMDB and TheTVDB metadata"
-  homepage "https://github.com/am517/jack"
-  url "https://github.com/am517/jack/archive/refs/tags/v0.1.7.tar.gz"
-  sha256 "82695dbc1f8bc2115fe8517dc0a42c07f664b9984a55a6d80a00f677f1a84977"
+  homepage "https://github.com/am517/windups"
+  url "https://github.com/am517/windups/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "SHA256"
   license "MIT"
-  head "https://github.com/am517/jack.git", branch: "main"
+  head "https://github.com/am517/windups.git", branch: "main"
 
   depends_on "rust" => :build
   depends_on "atomicparsley"
@@ -13,12 +13,13 @@ class WindupsJack < Formula
 
   def install
     # Optional build-time API keys (never stored in the formula):
-    #   HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... HOMEBREW_JACK_OMDB_KEY=... brew install --build-from-source am517/tap/windups-jack
+    #   HOMEBREW_JACK_TMDB_TOKEN=... HOMEBREW_JACK_TVDB_KEY=... HOMEBREW_JACK_OMDB_KEY=... brew install --build-from-source am517/tap/jack
     ENV["JACK_TMDB_TOKEN"] = ENV["HOMEBREW_JACK_TMDB_TOKEN"] if ENV["HOMEBREW_JACK_TMDB_TOKEN"].present?
     ENV["JACK_TVDB_KEY"] = ENV["HOMEBREW_JACK_TVDB_KEY"] if ENV["HOMEBREW_JACK_TVDB_KEY"].present?
     ENV["JACK_OMDB_KEY"] = ENV["HOMEBREW_JACK_OMDB_KEY"] if ENV["HOMEBREW_JACK_OMDB_KEY"].present?
-    system "cargo", "install", *std_cargo_args
-    pkgshare.install "config/jack.toml" => "config.toml.example"
+    # windups is a Cargo workspace; Jack lives in jack/
+    system "cargo", "install", *std_cargo_args(path: "jack")
+    pkgshare.install "jack/config/jack.toml" => "config.toml.example"
   end
 
   def caveats
@@ -30,6 +31,7 @@ class WindupsJack < Formula
   end
 
   test do
-    assert_match "jack", shell_output("#{bin}/jack --version")
+    assert_match "jack #{version}", shell_output("#{bin}/jack --version")
+    assert_match "name = \"jack\"", shell_output("#{bin}/jack --capabilities")
   end
 end

@@ -83,7 +83,7 @@ fn nothing_incomplete_is_forgotten() {
         out.contains("2 due, 1 with a file present") && out.contains("jack ran"),
         "{out}"
     );
-    assert_eq!(*jack.called.borrow(), [f.clone()]);
+    assert_eq!(*jack.called.borrow(), std::slice::from_ref(&f));
     // now `pending` lists them (complete has no return), still without calling anyone
     let out = walter::run("pending", &args(&[]), &jack).unwrap();
     assert!(

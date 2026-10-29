@@ -1,0 +1,2 @@
+# Debian/Raspberry Pi OS toolchains are older; keep suggestions buildable there
+msrv = "1.85"
