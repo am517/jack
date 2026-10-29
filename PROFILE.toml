@@ -1,6 +1,12 @@
 name = "kate"
 role = "images"
 summary = "Kate converts artwork: JPEG for embedding in media files, JPEG XL for the archive."
+purpose = "Keep artwork in the right format for each use."
+success_checks = [
+  "embedded art is JPEG that common players read",
+  "archived art is JPEG XL, lossless from JPEG sources",
+  "the original image is never altered or lost",
+]
 status = "stub"
 reads = ["artwork files"]
 writes = ["converted images"]
