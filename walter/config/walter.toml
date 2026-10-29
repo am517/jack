@@ -1,0 +1,17 @@
+# Walter's defaults. Override in ~/.config/windups/walter/config.toml.
+
+# Windups Walter knows how to call (name -> command). He asks each for `--capabilities` on patrol.
+[windups]
+jack = ["jack", "--caller", "walter"]  # tagged, so Daniel won't alert Walter back
+
+# Unfinished entries come back after back-off hours (by attempt; the last value repeats), or as
+# soon as the capability their stage waits for appears ("new_source": any source not seen before).
+[retry]
+backoff_hours = [1, 24, 168, 720]
+
+[retry.wait_for]
+# A wait names the windup (or source) waited on.
+not_identified = "sammy"     # ambiguous or unknown: needs judgement (Sammy thinks)
+undetermined = "new_source"  # nothing to go on yet
+unverified = "julie"         # needs checking against evidence (Julie verifies, asks Sammy if needed)
+incomplete = "new_source"    # or the missing fields

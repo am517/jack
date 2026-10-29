@@ -1,0 +1,130 @@
+//! Walter end to end on a real database with a fake Jack.
+use std::cell::RefCell;
+use std::path::PathBuf;
+use walter::caller::Caller;
+
+#[derive(Default)]
+struct FakeJack {
+    sources: RefCell<Vec<&'static str>>,
+    called: RefCell<Vec<PathBuf>>,
+}
+
+impl Caller for FakeJack {
+    fn capabilities(&self, _: &[String]) -> Option<String> {
+        let s: Vec<String> = self
+            .sources
+            .borrow()
+            .iter()
+            .map(|s| format!("{s:?}"))
+            .collect();
+        Some(format!(
+            "name = \"jack\"\nversion = \"0.1\"\nsources = [{}]\n",
+            s.join(", ")
+        ))
+    }
+    fn call(&self, _: &[String], files: &[PathBuf]) -> Result<String, String> {
+        self.called.borrow_mut().extend(files.iter().cloned());
+        Ok("jack ran\n".into())
+    }
+}
+
+#[test]
+fn nothing_incomplete_is_forgotten() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("m.db");
+    let cfg = d.path().join("w.toml");
+    std::fs::write(&cfg, "[retry]\nbackoff_hours = [0, 24]\n").unwrap();
+    let f = d.path().join("Nothing.Like.It.mkv");
+    std::fs::write(&f, "x").unwrap();
+    {
+        let c = windups::db::open(&db).unwrap();
+        for (t, stage) in [
+            ("a", "unverified"),
+            ("b", "complete"),
+            ("c", "not_identified"),
+        ] {
+            c.execute(
+                "INSERT INTO media(kind, title, source) VALUES ('movie', ?1, 'x')",
+                [t],
+            )
+            .unwrap();
+            let id = c.last_insert_rowid();
+            windups::lifecycle::set(&c, id, stage, "jack", "test").unwrap();
+        }
+        c.execute(
+            "INSERT INTO files(path, media_id) VALUES (?1, 1)",
+            [f.to_str().unwrap()],
+        )
+        .unwrap();
+    }
+    let args = |extra: &[&str]| {
+        let mut v = vec![
+            "--db".to_string(),
+            db.to_str().unwrap().into(),
+            "--config".into(),
+            cfg.to_str().unwrap().into(),
+        ];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    };
+    let jack = FakeJack::default();
+    jack.sources.borrow_mut().push("tmdb");
+    // before any patrol nothing is scheduled, and `pending` is read-only: it schedules nothing, runs nobody
+    let out = walter::run("pending", &args(&[]), &jack).unwrap();
+    assert!(
+        out.starts_with("0 pending") && !out.contains("due"),
+        "{out}"
+    );
+    assert!(jack.called.borrow().is_empty());
+    assert!(walter::run("pending", &args(&["--wake", "sammy"]), &jack).is_err());
+    // a patrol schedules returns: first back-off is 0 h, so both are due (one has a file) and Jack runs
+    let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    assert!(
+        out.contains("2 due, 1 with a file present") && out.contains("jack ran"),
+        "{out}"
+    );
+    assert_eq!(*jack.called.borrow(), [f.clone()]);
+    // now `pending` lists them (complete has no return), still without calling anyone
+    let out = walter::run("pending", &args(&[]), &jack).unwrap();
+    assert!(
+        out.contains("2 pending") && !out.contains("due"),
+        "complete has no return: {out}"
+    );
+    assert_eq!(jack.called.borrow().len(), 1);
+    assert!(
+        out.contains("[unverified]") && out.contains("when julie appears"),
+        "{out}"
+    );
+    assert!(
+        out.contains("[not_identified]") && out.contains("when sammy appears"),
+        "{out}"
+    );
+    // then it backs off a day
+    let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    assert!(out.contains("0 due"), "{out}");
+    // a new source appears in Jack's profile: nothing here waits for new_source, so nothing wakes
+    jack.sources.borrow_mut().push("omdb");
+    let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    assert!(!out.contains("woke") && out.contains("0 due"), "{out}");
+    // Julie appears: what waits for her (the unverified entry) is due at once
+    let out = walter::run("patrol", &args(&["--wake", "julie"]), &jack).unwrap();
+    assert!(
+        out.contains("woke items waiting for: julie") && out.contains("1 due"),
+        "{out}"
+    );
+    // `note` is a full patrol too, and every patrol is stamped for Daniel to count from
+    let out = walter::run("note", &args(&[]), &jack).unwrap();
+    assert!(out.contains("0 due"), "{out}");
+    let c = windups::db::open(&db).unwrap();
+    let stamped: i64 = c
+        .query_row(
+            "SELECT count(*) FROM windup_state WHERE windup = 'walter' AND key = 'last_patrol'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stamped, 1);
+    // Sammy named by hand
+    let out = walter::run("patrol", &args(&["--wake", "sammy"]), &jack).unwrap();
+    assert!(out.contains("woke items waiting for: sammy"), "{out}");
+}
