@@ -38,6 +38,7 @@ use clap::Parser;
 
 fn main() {
     let mut cli = cli::Cli::parse();
+    crate::daniel::set_caller(cli.caller.clone());
     if cli.capabilities {
         print!("{}", profile::PROFILE);
         return;

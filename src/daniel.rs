@@ -5,6 +5,13 @@ use daniel::StoreCfg;
 use std::path::Path;
 use windups::handoff::{Daniel, Handoff};
 
+static CALLER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Who called this Jack run (`--caller`), carried in every handoff.
+pub fn set_caller(c: Option<String>) {
+    let _ = CALLER.set(c);
+}
+
 /// Hands one entry for `path` to Daniel.
 pub fn hand_over(
     path: &Path,
@@ -23,5 +30,6 @@ pub fn hand_over(
         candidates: found.to_vec(),
         conflicts,
         from: "jack".into(),
+        caller: CALLER.get().cloned().flatten(),
     })
 }

@@ -16,6 +16,9 @@ pub(crate) struct Cli {
     /// Print Jack's profile (what he does, reads, writes) and exit
     #[arg(long)]
     pub(crate) capabilities: bool,
+    /// The windup that called this run (e.g. walter); handed to Daniel so he doesn't call it back
+    #[arg(long, value_name = "WINDUP")]
+    pub(crate) caller: Option<String>,
     /// Save the other option flags as defaults in the main config (then run, if paths are given)
     #[arg(long)]
     pub(crate) set: bool,
@@ -203,6 +206,12 @@ mod tests {
     #[test]
     fn type_flags_conflicts_and_set() {
         assert!(Cli::try_parse_from(["jack", "--tv", "--movie", "x"]).is_err());
+        let c = Cli::try_parse_from(["jack", "--caller", "walter", "x"]).unwrap();
+        assert_eq!(
+            c.caller.as_deref(),
+            Some("walter"),
+            "carried to Daniel (loop guard)"
+        );
         assert!(
             run(
                 &cli(&["--type", "movie", "--tv", "x"]),
