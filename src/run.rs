@@ -97,6 +97,17 @@ pub(crate) fn run(cli: &Cli, http: &dyn Http) -> Result<(String, String, usize),
     let flagged = crate::review::pass(&cfg.review, &crate::review::NoReview, &hk.done, &mut o);
     hk.open.extend(flagged);
     o += &crate::explain::report(&hk.open, hk.ex);
+    // where entries stand: kept, not failed (a failure is something Jack could not do at all)
+    let mut stages = std::collections::BTreeMap::<&str, usize>::new();
+    for (_, m) in &hk.done {
+        *stages
+            .entry(m.get("lifecycle").map_or("unknown", |s| s.as_str()))
+            .or_default() += 1;
+    }
+    if !stages.is_empty() {
+        let l: Vec<String> = stages.iter().map(|(k, v)| format!("{v} {k}")).collect();
+        let _ = writeln!(o, "entries: {}; failed: {failed}", l.join(", "));
+    }
     if !pr.json.is_empty() {
         pr.text += &(serde_json::to_string_pretty(&pr.json).map_err(|e| e.to_string())? + "\n");
     }
@@ -191,7 +202,11 @@ mod tests {
             &h,
         )
         .unwrap();
-        assert_eq!(failed, 1, "{out}");
+        assert_eq!(failed, 0, "incomplete is not failed: {out}");
+        assert!(
+            out.contains("entries: 1 not_identified, 1 undetermined; failed: 0"),
+            "{out}"
+        );
         assert!(out.contains("2 item(s) need attention"), "{out}");
         assert!(
             out.contains("More than one exact match") && out.contains("--year"),
@@ -212,6 +227,40 @@ mod tests {
             n("SELECT count(*) FROM media WHERE source = 'tmdb:search'"),
             2,
             "the whole search list is kept"
+        );
+        assert_eq!(
+            n("SELECT count(*) FROM media WHERE lifecycle = 'undetermined' AND kind = 'unknown'"),
+            1,
+            "file purgatory"
+        );
+        assert_eq!(
+            n("SELECT count(*) FROM status_history WHERE actor = 'jack'"),
+            2
+        );
+        let ids = |c: &rusqlite::Connection| -> Vec<i64> {
+            c.prepare("SELECT id FROM media WHERE lifecycle IS NOT NULL ORDER BY id")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let before = ids(&c);
+        drop(c);
+        run(
+            &cli(&[
+                d.path().to_str().unwrap(),
+                "--config",
+                cfg.to_str().unwrap(),
+            ]),
+            &h,
+        )
+        .unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        assert_eq!(
+            ids(&c),
+            before,
+            "a re-run keeps the same entries (stable ids)"
         );
     }
 

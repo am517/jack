@@ -27,6 +27,7 @@ mod setflags;
 mod settle;
 mod sorter;
 mod sources;
+mod stage;
 mod store;
 mod tagger;
 #[cfg(test)]

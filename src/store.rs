@@ -180,7 +180,21 @@ pub fn record(
 ) -> rusqlite::Result<i64> {
     let tx = c.transaction()?;
     let online = meta.get("kind").is_some_and(|k| k == crate::online::KIND);
-    let existing = find_existing(&tx, meta, online)?;
+    let existing = match find_existing(&tx, meta, online)? {
+        Some(i) => Some(i),
+        // the same file again: its entry (even an undetermined one) is identified in place, same id
+        None => tx
+            .query_row(
+                "SELECT media_id FROM files WHERE path = ?1 AND media_id IS NOT NULL",
+                [path.to_string_lossy()],
+                |r| r.get(0),
+            )
+            .optional()?,
+    };
+    // a merged entry points at the one that stands now
+    let existing = existing
+        .map(|i| windups::lifecycle::resolve_id(&tx, i))
+        .transpose()?;
     let id = upsert_media(&tx, existing, meta, "merged", "chosen", None)?;
     add_details(&tx, id, meta, "merged", true)?;
     for g in meta
@@ -258,6 +272,16 @@ pub fn record(
     for (src, m) in found {
         let cid = upsert_media(&tx, None, m, src, "candidate", Some(id))?;
         add_details(&tx, cid, m, src, false)?;
+    }
+    // where the entry stands now; every move is kept in status_history
+    if let Some(stage) = meta.get("lifecycle") {
+        let why = meta
+            .get("unresolved_reason")
+            .or(meta.get("research_reason"))
+            .or(meta.get("evidence"))
+            .map_or("", |s| s.as_str());
+        windups::lifecycle::set(&tx, id, stage, "jack", why)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
     }
     // escalation decisions, with provenance (who, which step, when)
     if let Some(list) = meta

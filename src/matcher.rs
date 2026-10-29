@@ -14,6 +14,9 @@ pub struct MatchCfg {
     pub show_from_parent_dir: bool,
     /// Use the text after SxxExx (minus cleanup junk) as the episode title when no provider has one.
     pub episode_title_from_filename: bool,
+    /// Years this far apart still count as agreeing (release dates differ by country). A hint for
+    /// matching only: never evidence that two things are the same.
+    pub year_tolerance: u32,
 }
 
 fn re(p: &str) -> Result<Regex, String> {

@@ -34,9 +34,28 @@ pub(crate) fn process(
             own.keys().cloned().collect::<Vec<_>>().join(", ")
         );
     }
-    let (mut meta, mut found, mut unresolved) = match online_label(path, s, cfg) {
+    // an online video is fetched by its own site id: that id identifies the video
+    let label = online_label(path, s, cfg);
+    let by_site_id = label.is_some();
+    let (mut meta, mut found, mut unresolved) = match label {
         Some(l) => {
-            let o = online::fetch(&l, &show_flags(s), cfg, http, &crate::resolver::Strict, out)?;
+            let o =
+                match online::fetch(&l, &show_flags(s), cfg, http, &crate::resolver::Strict, out) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        return incomplete(
+                            path,
+                            Step::Lookup,
+                            "source_error",
+                            e,
+                            &own,
+                            s,
+                            cfg,
+                            hk,
+                            out,
+                        );
+                    }
+                };
             (o.meta, o.found, o.unresolved)
         }
         None => {
@@ -69,7 +88,7 @@ pub(crate) fn process(
             };
             let mut m = m;
             if let crate::decide::Decision::Unresolved(reason, detail) =
-                crate::decide::decide(&q, s, &f)
+                crate::decide::decide(&q, s, &f, cfg.matching.year_tolerance)
             {
                 m.insert("resolution".into(), "unresolved".into());
                 m.insert("unresolved_reason".into(), reason.to_string());
@@ -96,14 +115,15 @@ pub(crate) fn process(
             unresolved = false;
         }
     }
+    // only an id is proof; the user's --name/--year or channel mapping settles names, not identity
+    let id_flag = [&s.imdb, &s.tmdb, &s.thetvdb]
+        .iter()
+        .any(|v| v.as_ref().is_some_and(|v| !v.is_empty()));
+    let user_named = s.name.is_some() && s.year.is_some();
+    let ev = crate::facts::evidence(&meta, &own, id_flag || by_site_id, user_named);
     if !own.is_empty() {
         if !unresolved {
             // the file's facts stand unless independent evidence confirms the source means the same thing
-            let flag = [&s.imdb, &s.tmdb, &s.thetvdb]
-                .iter()
-                .any(|v| v.as_ref().is_some_and(|v| !v.is_empty()))
-                || (s.name.is_some() && s.year.is_some());
-            let ev = crate::facts::evidence(&meta, &own, flag);
             if let Some(e) = ev {
                 meta.insert("evidence".into(), e.into());
             }
@@ -147,6 +167,12 @@ pub(crate) fn process(
         }
         found.push(("embedded".into(), own));
     }
+    let stage = crate::stage::of(
+        unresolved,
+        crate::facts::verified(ev),
+        meta.contains_key("research_reason"),
+    );
+    meta.insert("lifecycle".into(), stage.into());
     let t = &cfg.tagger;
     // art is kept beside the file only with -d; otherwise it's a temp file removed after tagging
     let pp = art_path(path, s, dl);
@@ -367,6 +393,8 @@ fn incomplete(
         out,
     );
     m.insert("completeness".into(), "incomplete".into());
+    // file purgatory: only the file's own values, kept under a stable id until identified or merged
+    m.insert("lifecycle".into(), crate::stage::UNDETERMINED.into());
     if !Settings::flag(s.dry_run) && cfg.store.enabled {
         match store::save(path, &m, &found, &cfg.store) {
             Ok(w) => {
@@ -377,5 +405,6 @@ fn incomplete(
             }
         }
     }
-    Err(e)
+    hk.done.push((path.to_string_lossy().into_owned(), m));
+    Ok(())
 }

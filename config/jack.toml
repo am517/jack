@@ -285,6 +285,10 @@ awards = ["omdb"]
 
 [matching]
 
+# Sources whose years differ by at most this much are taken to agree (a release can be a year apart
+# in different countries). Only a hint for matching; a year never proves identity, only an id does.
+year_tolerance = 1
+
 # How titles are read from file names (regular expressions).
 separators = '[._]+'
 
@@ -363,7 +367,7 @@ busy_timeout_secs = 5
 [embedded]
 # Read the file's own metadata first; it is the truth for facts (not wording) and always kept as
 # source "embedded". A source's value replaces it only when written the same way or when independent
-# evidence (shared id, matching year, channel mapping, explicit flag) confirms the same entity; similar
+# evidence (an id, or the user's own word: --name/--year or channel mapping) confirms the same entity; similar
 # wording is not proof. Otherwise the file's value stays, a conflict is recorded and the item stays open.
 enabled = true
 

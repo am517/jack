@@ -25,7 +25,7 @@ fn label(m: &Meta) -> String {
     format!("{t} ({})", year(m).unwrap_or_else(|| "?".into()))
 }
 
-pub fn decide(q: &Query, s: &Settings, found: &[(String, Meta)]) -> Decision {
+pub fn decide(q: &Query, s: &Settings, found: &[(String, Meta)], year_tolerance: u32) -> Decision {
     let set = |o: &Option<String>| o.as_ref().is_some_and(|v| !v.is_empty());
     if q.imdb.is_some() || q.tmdb.is_some() || q.thetvdb.is_some() || (set(&s.name) && set(&s.year))
     {
@@ -63,9 +63,15 @@ pub fn decide(q: &Query, s: &Settings, found: &[(String, Meta)]) -> Decision {
     }
     // sources naming different works (different years) disagree
     let mut years: Vec<String> = hits.iter().filter_map(|(_, m)| year(m)).collect();
+    let nums: Vec<i64> = years.iter().filter_map(|y| y.parse().ok()).collect();
+    let spread = nums
+        .iter()
+        .max()
+        .zip(nums.iter().min())
+        .map_or(0, |(a, b)| a - b);
     years.sort();
     years.dedup();
-    if years.len() > 1 {
+    if years.len() > 1 && (nums.len() < years.len() || spread > year_tolerance as i64) {
         let list: Vec<String> = hits
             .iter()
             .map(|(src, m)| format!("{src}: {}", label(m)))
@@ -98,6 +104,9 @@ pub fn decide(q: &Query, s: &Settings, found: &[(String, Meta)]) -> Decision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn d0(q: &Query, s: &Settings, f: &[(String, Meta)]) -> Decision {
+        decide(q, s, f, 0)
+    }
     fn m(src: &str, t: &str, y: &str) -> (String, Meta) {
         (
             src.into(),
@@ -119,7 +128,7 @@ mod tests {
     fn acts_only_on_sure_information() {
         let none = Settings::default();
         assert_eq!(
-            decide(
+            d0(
                 &q("The Matrix", Some("1999")),
                 &none,
                 &[m("tmdb", "The Matrix", "1999")]
@@ -127,7 +136,7 @@ mod tests {
             Decision::Sure
         );
         assert!(matches!(
-            decide(
+            d0(
                 &q("The Matrix", Some("1999")),
                 &none,
                 &[m("tmdb", "The Matrix Reloaded", "2003")]
@@ -135,7 +144,7 @@ mod tests {
             Decision::Unresolved("no_match", _)
         ));
         assert_eq!(
-            decide(
+            d0(
                 &q("breaking.bad", None),
                 &none,
                 &[m("tmdb", "Breaking Bad", "2008")]
@@ -143,7 +152,7 @@ mod tests {
             Decision::Sure
         );
         assert!(matches!(
-            decide(
+            d0(
                 &q("Breaking Bad", None),
                 &none,
                 &[m("tmdb", "Breaking Bad: Original Minisodes", "2009")]
@@ -156,11 +165,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            decide(&q("Breaking Bad", Some("2008")), &named, &[]),
+            d0(&q("Breaking Bad", Some("2008")), &named, &[]),
             Decision::Sure
         );
         assert_eq!(
-            decide(
+            d0(
                 &Query {
                     imdb: Some("tt1".into()),
                     ..q("x", None)
@@ -181,14 +190,14 @@ mod tests {
             m("tmdb:search", "The Office", "2001"),
             m("tmdb:search", "The Office Mixup", "2020"),
         ];
-        let d = decide(&q("The Office", None), &none, &f);
+        let d = d0(&q("The Office", None), &none, &f);
         assert!(
             matches!(&d, Decision::Unresolved("ambiguous", x) if x.contains("2001") && x.contains("2005")),
             "{d:?}"
         );
         // with the year it is unique
         assert_eq!(
-            decide(&q("The Office", Some("2005")), &none, &f),
+            d0(&q("The Office", Some("2005")), &none, &f),
             Decision::Sure
         );
         // each list has one, but the sources disagree
@@ -197,7 +206,7 @@ mod tests {
             m("thetvdb:search", "Dune", "1984"),
         ];
         assert!(matches!(
-            decide(&q("Dune", None), &none, &f),
+            d0(&q("Dune", None), &none, &f),
             Decision::Unresolved("needs_flags", _)
         ));
         // exactly one exact match across all lists, sources agree
@@ -207,7 +216,7 @@ mod tests {
             m("tmdb:search", "Why Women Kill", "2019"),
             m("thetvdb:search", "The Why Files", "2021"),
         ];
-        assert_eq!(decide(&q("The Why Files", None), &none, &f), Decision::Sure);
+        assert_eq!(d0(&q("The Why Files", None), &none, &f), Decision::Sure);
         // the exact match was listed but the details fetched are another work's
         let f = [
             m("tmdb", "Why Women Kill", "2019"),
@@ -215,7 +224,20 @@ mod tests {
             m("tmdb:search", "The Why Files", "2021"),
         ];
         assert!(matches!(
-            decide(&q("The Why Files", None), &none, &f),
+            d0(&q("The Why Files", None), &none, &f),
+            Decision::Unresolved("needs_flags", _)
+        ));
+    }
+    #[test]
+    fn year_tolerance_is_a_hint_for_agreement() {
+        let none = Settings::default();
+        let f = [
+            m("tmdb:search", "Amelie", "2001"),
+            m("tvmaze:search", "Amelie", "2002"),
+        ];
+        assert_eq!(decide(&q("Amelie", None), &none, &f, 1), Decision::Sure);
+        assert!(matches!(
+            decide(&q("Amelie", None), &none, &f, 0),
             Decision::Unresolved("needs_flags", _)
         ));
     }
