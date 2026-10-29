@@ -131,7 +131,7 @@ fn show_row(tx: &Transaction, meta: &Meta, show: &str) -> rusqlite::Result<i64> 
     Ok(sid)
 }
 
-fn db_path(cfg: &StoreCfg) -> Result<PathBuf, String> {
+pub(crate) fn db_path(cfg: &StoreCfg) -> Result<PathBuf, String> {
     if cfg.database.is_empty() {
         Ok(windups::Settings::load()?.database_path())
     } else {
@@ -145,6 +145,8 @@ pub fn save(
     meta: &Meta,
     found: &[(String, Meta)],
     cfg: &StoreCfg,
+    fper: &dyn crate::fingerprint::Fingerprinter,
+    fcfg: &crate::fingerprint::FingerprintCfg,
 ) -> Result<String, String> {
     let db = db_path(cfg).and_then(|p| windups::db::open(&p).map(|c| (p, c)));
     match db {
@@ -152,6 +154,11 @@ pub fn save(
             c.busy_timeout(std::time::Duration::from_secs(cfg.busy_timeout_secs))
                 .map_err(|e| e.to_string())?;
             let id = record(&mut c, path, meta, found).map_err(|e| e.to_string())?;
+            if let Some(fp) = meta.get("file_fingerprint") {
+                // hints only: open proposals, never merge
+                crate::fingerprint::propose_similar(&c, id, fp, fper, fcfg)
+                    .map_err(|e| e.to_string())?;
+            }
             Ok(format!("database: media #{id} in {}", p.display()))
         }
         Err(e) => {
@@ -189,7 +196,8 @@ pub fn record(
                 [path.to_string_lossy()],
                 |r| r.get(0),
             )
-            .optional()?,
+            .optional()?
+            .or(moved(&tx, path, meta)?),
     };
     // a merged entry points at the one that stands now
     let existing = existing
@@ -282,6 +290,13 @@ pub fn record(
             .map_or("", |s| s.as_str());
         windups::lifecycle::set(&tx, id, stage, "jack", why)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+        // finish well: anything not complete gets a scheduled return
+        if stage == "complete" {
+            windups::returns::clear(&tx, id)?;
+        } else {
+            let w = meta.get(crate::returns::WAITING_FOR).map(String::as_str);
+            windups::returns::schedule(&tx, id, stage, why, w, &crate::returns::backoff(meta))?;
+        }
     }
     // escalation decisions, with provenance (who, which step, when)
     if let Some(list) = meta
@@ -301,12 +316,48 @@ pub fn record(
             )?;
         }
     }
-    tx.execute("INSERT INTO files(path, media_id) VALUES (?1, ?2) ON CONFLICT(path) DO UPDATE SET media_id = excluded.media_id", params![path.to_string_lossy(), id])?;
+    let size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
+    tx.execute("INSERT INTO files(path, media_id, hash, size, fingerprint) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(path) DO UPDATE SET media_id = excluded.media_id, hash = coalesce(excluded.hash, hash), size = coalesce(excluded.size, size), fingerprint = coalesce(excluded.fingerprint, fingerprint)", params![path.to_string_lossy(), id, meta.get("file_hash"), size, meta.get("file_fingerprint")])?;
+    // the work this is a version of (identified entries only)
+    if !matches!(
+        meta.get("lifecycle").map(String::as_str),
+        Some(crate::stage::UNDETERMINED) | Some("not_identified")
+    ) {
+        if let Some(r) = crate::workkey::reference(meta) {
+            windups::works::link(
+                &tx,
+                id,
+                &crate::workkey::key(&r),
+                &r,
+                &crate::workkey::ids(meta),
+            )
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+        }
+    }
     tx.commit()?;
     Ok(id)
 }
 
 /// A re-run updates the same entry (found by any known id) instead of adding a duplicate.
+/// The same content whose old path is gone (renamed or moved): its entry; the old file row is
+/// dropped so the new path takes over. A copy whose original is still there is a separate file.
+fn moved(tx: &Transaction, path: &Path, meta: &Meta) -> rusqlite::Result<Option<i64>> {
+    let Some(h) = meta.get("file_hash") else {
+        return Ok(None);
+    };
+    let olds: Vec<(String, i64)> = tx
+        .prepare("SELECT path, media_id FROM files WHERE hash = ?1 AND media_id IS NOT NULL AND path <> ?2 ORDER BY id")?
+        .query_map(params![h, path.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (p, id) in olds {
+        if !Path::new(&p).exists() {
+            tx.execute("DELETE FROM files WHERE path = ?1", [&p])?;
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
 fn find_existing(tx: &Transaction, meta: &Meta, online: bool) -> rusqlite::Result<Option<i64>> {
     // an online video's show ids find its show, not the video
     for (k, src, scope) in IDS
@@ -674,9 +725,16 @@ mod tests {
             busy_timeout_secs: 1,
         };
         assert!(
-            save(&m, &meta, &found, &cfg)
-                .unwrap()
-                .starts_with("database: media #1")
+            save(
+                &m,
+                &meta,
+                &found,
+                &cfg,
+                &crate::fingerprint::NoFingerprint,
+                &Default::default()
+            )
+            .unwrap()
+            .starts_with("database: media #1")
         );
         assert!(!d.path().join("a.mp4.jack.json").exists());
         // unopenable database (its folder is a file): JSON beside the media
@@ -686,9 +744,16 @@ mod tests {
             ..cfg
         };
         assert!(
-            save(&m, &meta, &found, &bad)
-                .unwrap()
-                .contains("no database")
+            save(
+                &m,
+                &meta,
+                &found,
+                &bad,
+                &crate::fingerprint::NoFingerprint,
+                &Default::default()
+            )
+            .unwrap()
+            .contains("no database")
         );
         let j: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(d.path().join("a.mp4.jack.json")).unwrap(),
@@ -700,6 +765,50 @@ mod tests {
                 j["candidates"][0]["source"].as_str()
             ),
             (Some("T"), Some("tmdb"))
+        );
+    }
+
+    #[test]
+    fn moved_file_is_refound_by_hash_and_versions_share_a_work() {
+        let d = tempfile::tempdir().unwrap();
+        let mut c = windups::db::open(&d.path().join("m.db")).unwrap();
+        let movie = |extra: &[(&str, &str)]| {
+            let mut m = mk(&[
+                ("kind", "movie"),
+                ("title", "Heat"),
+                ("year", "1995"),
+                ("lifecycle", "unverified"),
+            ]);
+            m.extend(mk(extra));
+            m
+        };
+        let old = d.path().join("old.mkv");
+        let a = record(&mut c, &old, &movie(&[("file_hash", "b3:aa")]), &[]).unwrap();
+        // renamed: the old path is gone, same content -> same entry, path moves
+        let new = d.path().join("new.mkv");
+        std::fs::write(&new, b"x").unwrap();
+        let b = record(&mut c, &new, &movie(&[("file_hash", "b3:aa")]), &[]).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(count(&c, "SELECT count(*) FROM files"), 1);
+        // a different encode of the same work: its own entry, same work key
+        let other = record(
+            &mut c,
+            &d.path().join("heat-720p.mkv"),
+            &movie(&[("file_hash", "b3:bb")]),
+            &[],
+        )
+        .unwrap();
+        assert_ne!(other, a);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(DISTINCT work_key) FROM media WHERE work_key IS NOT NULL"
+            ),
+            1
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM media WHERE work_key IS NOT NULL"),
+            2
         );
     }
 }

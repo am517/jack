@@ -456,6 +456,14 @@ mod tests {
         );
         assert_eq!(meta["genre"], "animation,drama,mystery");
         assert_eq!(meta["grouping"], "Anime");
+        assert!(
+            meta["decisions"].contains("\"source\":\"user_asserted\"")
+                && meta["decisions"].contains("--name/--year"),
+            "the user's word is recorded as theirs: {}",
+            meta["decisions"]
+        );
+        assert_ne!(meta["lifecycle"], "complete", "a name is not an id");
+        assert!(meta["file_hash"].starts_with("b3:"));
         assert!(out.contains("warning: tmdb: no S03E01"), "{out}");
         assert!(
             out.contains("tmdb=220542") && out.contains("433631"),

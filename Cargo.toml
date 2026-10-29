@@ -20,6 +20,7 @@ ureq = { version = "2", features = ["json"] }
 unicode-normalization = "0.1.26"
 windups = { path = "../windups" }
 rusqlite = "0.32"
+blake3 = "1.8.7"
 
 [dev-dependencies]
 tempfile = "3"

@@ -5,7 +5,7 @@
 pub const UNDETERMINED: &str = "undetermined";
 
 /// `unresolved`: no answer could be settled on; `verified`: identified by an id (the only proof);
-/// `open`: something is still to look into (a conflict, a needed flag).
+/// `open`: something is still to look into (a conflict, a needed flag, a missing required field).
 pub fn of(unresolved: bool, verified: bool, open: bool) -> &'static str {
     match (unresolved, verified, open) {
         (true, _, _) => "not_identified",

@@ -172,6 +172,10 @@ pub struct Config {
     pub embedded: crate::filemeta::EmbeddedCfg,
     pub explain: crate::explain::ExplainCfg,
     pub review: crate::review::ReviewCfg,
+    pub completeness: crate::completeness::CompletenessCfg,
+    pub hash: crate::hash::HashCfg,
+    pub fingerprint: crate::fingerprint::FingerprintCfg,
+    pub retry: crate::returns::RetryCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {
