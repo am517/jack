@@ -4,6 +4,13 @@
 name = "jack"
 role = "metadata"
 summary = "Jack is the boss of all metadata. He reads a media file's own label first, looks it up in online databases, keeps everything he finds, and acts only on sure decisions."
+purpose = "Know what every media file is, from the file's own facts and online sources, without ever guessing."
+success_checks = [
+  "every file processed gets exactly one entry handed to Daniel",
+  "no guesses: an unsettled choice is stored as not_identified with all candidates and a reason",
+  "only an id (from the file or a confirmed match) moves an entry to complete",
+  "every source answer is kept as a candidate, never overwritten",
+]
 status = "active"
 kinds = ["movie", "episode", "online_video"]
 later_kinds = ["book", "document"]
