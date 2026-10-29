@@ -22,6 +22,12 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - [ ] Wikidata and YouTube searches still take one result (srlimit=1 / maxResults=1); keep the full list like the others
 - [ ] Store each windup's PROFILE.toml in the `windups` table (and embed it) on run
 
+## Round 9
+- [x] `purpose` and `success_checks` in every PROFILE.toml
+- [x] Rover stub (refining windup); `walter pending` read-only; monorepo
+- [ ] Much later: an (unnamed) profile-managing windup that evaluates, creates and pauses windups
+- [ ] Homebrew tap (am517/homebrew-tap) `jack` formula still points at the old am517/jack repo
+
 ## Later, in order (not started)
 1. **Lauren**: tags and embeds from the database (takes over Jack's built-in tagging; Jack keeps a fallback)
 2. **Sammy**: chooses between sources (description, titles, dates, art) and summarizes; local model or opt-in remote API (`allow_remote_metadata`)

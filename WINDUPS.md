@@ -23,6 +23,7 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 - **Margaret**: directory; knows every windup's capabilities.
 - **Oliver**: matchmaker; breaks requests down and teams windups up.
 - **Ben**: rebuilds the windups for new platforms.
+- **Rover**: refines other windups, bound by each one's purpose and success checks; proposes and tests, never applies unreviewed.
 
 ## Roster
 
@@ -34,6 +35,7 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 | Julie | verification: checks entries against evidence, calls Sammy when judgment is needed | stub crate |
 | Ruth | references: APA 7 work reference and key from gathered facts | library (real code) |
 | Ben | builds: rebuilds the windups for new platforms | stub crate |
+| Rover | refining: proposes and tests improvements to other windups, within their profiles; never applies unreviewed | stub crate |
 | Daniel | database manager: populates and keeps everything (an archive-ophile); takes Jack's handoff | own crate (real store code) |
 | Larry | hashing: exact (BLAKE3, partial first, full later) and perceptual | stub crate (hashing works, perceptual placeholder) |
 | Tom | vectors/embeddings for meaning search | stub crate |
@@ -275,7 +277,7 @@ frames at matching times. Still a hint only: it proposes, never merges.
 
 **No timers, only windups call windups.** No routines, cron or system timers. Walter examines entry
 state (stage, latest reason, `last_checked`, its return) and decides when to call Jack again:
-- `walter pending` lists unfinished work: `#id path [stage] reason — next: <time> UTC or when X appears (attempts n)`.
+- `walter pending` only lists unfinished work (read-only; see Round 9): `#id path [stage] reason — next: <time> UTC or when X appears (attempts n)`.
 - `walter patrol` discovers capabilities (windup profiles via `--capabilities`; their `sources`), wakes
   items waiting for anything new (a new source also wakes `new_source`), schedules returns, then calls
   Jack with the files of what is due (`--all` for everything pending; `--wake CAP` by hand).
@@ -300,7 +302,7 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
 ## Round 8 (Adam, 2026-10-28): Walter the data freak, Daniel the gatekeeper
 
 - **Walter patrols the whole database whenever he is called, for any reason**: `patrol`, `note` (the
-  same) and `pending` (lists, then patrols). Each patrol is stamped as `last_patrol` in
+  same). (Round 9: `pending` no longer patrols.) Each patrol is stamped as `last_patrol` in
   `windup_state` (schema v8). Anyone may call him.
 - **Daniel alerts Walter by default, only when it matters.** He counts changes since Walter's last
   patrol and their importance (`[importance]` weights: new entry 3, stage change 2, update 1) and
@@ -309,3 +311,14 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
 - **Loop guard.** Walter runs Jack as `jack --caller walter`; Jack carries `caller` in the handoff and
   Daniel counts that work but never alerts Walter about it.
 - English film references stay provisional until a source gives the original title (confirmed).
+
+## Round 9 (Adam, 2026-10-28): profiles with purpose, Rover, one repo
+
+- **Every PROFILE.toml has a `purpose`** (one sentence: why the windup exists) and **`success_checks`**
+  (a short list of concrete, testable statements, e.g. Jack: every file gets an entry; no guesses; only
+  ids confirm identity). A windup is judged by its own checks.
+- **Rover** (stub) refines other windups, strictly bound by each windup's purpose and success checks:
+  he proposes changes, tests them against those checks, and never applies an unreviewed change.
+- **`walter pending` is read-only**: it lists scheduled returns and nothing else (no patrol, no
+  capability discovery, no Jack). Walter patrols only when called to patrol (`patrol` or `note`).
+- **One repo**: all windups live in one Cargo workspace (github.com/am517/windups), one folder each.
