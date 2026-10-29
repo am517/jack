@@ -1,0 +1,10 @@
+name = "margaret"
+role = "directory"
+summary = "Margaret is the receptionist: knows every windup and its capabilities (their profiles) and points callers to the right one."
+purpose = "Know every windup and point callers to the right one."
+success_checks = [
+  "every installed windup's profile is listed",
+  "a request for a capability returns the windups that have it, or none",
+]
+status = "stub"
+command = "margaret --capabilities"
