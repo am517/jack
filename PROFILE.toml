@@ -1,0 +1,5 @@
+name = "oliver"
+role = "matchmaker"
+summary = "Oliver breaks messy requests down, decides which windups team up, and spots gaps that need a new windup."
+status = "stub"
+command = "oliver --capabilities"
