@@ -36,6 +36,12 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
         }
     };
     if !own.is_empty() {
+        if !unresolved {
+            // the file's facts stand; refinements from sources are fine, contradictions become conflicts
+            for f in crate::facts::apply(&mut meta, &own) {
+                let _ = writeln!(out, "    conflict: {f}: keeping the file's own value; recorded");
+            }
+        }
         found.push(("embedded".into(), own));
     }
     let t = &cfg.tagger;

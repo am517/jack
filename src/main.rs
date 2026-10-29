@@ -3,6 +3,7 @@ mod askart;
 mod cli;
 mod config;
 mod conflicts;
+mod facts;
 mod fetch;
 mod filemeta;
 mod matcher;

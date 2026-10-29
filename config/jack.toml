@@ -361,8 +361,9 @@ fallback_suffix = ".jack.json"
 busy_timeout_secs = 5
 
 [embedded]
-# Read the file's own metadata first. It is always kept as source "embedded" and compared with
-# the other sources (disagreements go to the conflicts table); it never overrides them.
+# Read the file's own metadata first; it is the truth for facts (not wording) and always kept as
+# source "embedded". A source may refine it when clearly the same ("Joe Rogan" -> "The Joe Rogan
+# Experience"); a contradiction never replaces it: the file's value stays, a conflict is recorded.
 enabled = true
 
 # Container tag (lowercase, as ffprobe reports it) -> Jack field.
