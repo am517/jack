@@ -2,11 +2,13 @@
 pub mod conflicts;
 pub mod db;
 pub mod decisions;
+pub mod handoff;
 pub mod lifecycle;
 pub mod names;
 pub mod paths;
 pub mod proposals;
 pub mod prune;
+pub mod registry;
 pub mod returns;
 pub mod settings;
 pub mod unresolved;

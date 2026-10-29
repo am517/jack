@@ -44,10 +44,11 @@ pub fn schedule(
         hours
     };
     c.execute(
-        "INSERT INTO returns(media_id, stage, reason, next_retry_at, waiting_for, attempts, updated_at)
-         VALUES (?1, ?2, ?3, CASE WHEN ?4 IS NULL THEN NULL ELSE datetime('now', printf('+%d hours', ?4)) END, ?5, ?6, CURRENT_TIMESTAMP)
+        "INSERT INTO returns(media_id, stage, reason, next_retry_at, waiting_for, attempts, updated_at, checked_at)
+         VALUES (?1, ?2, ?3, CASE WHEN ?4 IS NULL THEN NULL ELSE datetime('now', printf('+%d hours', ?4)) END, ?5, ?6, CURRENT_TIMESTAMP,
+                 (SELECT last_checked FROM media WHERE id = ?1))
          ON CONFLICT(media_id) DO UPDATE SET stage = excluded.stage, reason = excluded.reason, next_retry_at = excluded.next_retry_at,
-           waiting_for = excluded.waiting_for, attempts = excluded.attempts, updated_at = CURRENT_TIMESTAMP",
+           waiting_for = excluded.waiting_for, attempts = excluded.attempts, updated_at = CURRENT_TIMESTAMP, checked_at = excluded.checked_at",
         params![media_id, stage, reason, hours, waiting_for, attempts],
     )?;
     Ok(())

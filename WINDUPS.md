@@ -7,10 +7,15 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 
 | Windup | Job | Status |
 |---|---|---|
-| Jack | fetches metadata (online databases) | building |
+| Jack | fetches and verifies metadata for a file, hands one complete entry to Daniel | building |
 | Lauren | tags and embeds (writes metadata/art into files) | later |
 | Sammy | the brains: picks the best value when sources disagree, summarizes | later |
-| Daniel | database manager: populates and keeps everything (an archive-ophile) | later |
+| Daniel | database manager: populates and keeps everything (an archive-ophile); takes Jack's handoff | stub (trait in windups, store in Jack) |
+| Larry | hashing: exact (BLAKE3, partial first, full later) and perceptual | stub crate (hashing works, perceptual placeholder) |
+| Tom | vectors/embeddings for meaning search | stub crate |
+| Mary | summaries; runs before Larry/Tom where they depend on it | stub crate |
+| Kate | image conversion: JPEG to embed, JPEG XL to archive | stub crate |
+| Walter | patrol: watches the database for unfinished work and calls windups back (name pending Adam's OK) | building |
 | Steve | finds local information in the database (search) | later |
 | Sally | organizes files (rename, move, sort) | later |
 | Tammy | super windup: ingests new media by orchestrating the others | later |
@@ -209,10 +214,47 @@ come back until the entry is truly complete. Every entry that isn't `complete` h
   1 week, then monthly). With neither a time nor a resource configured it still returns in a day.
 - **Resource-based:** `waiting_for` names a capability (`[retry.wait_for]` per stage; default
   `not_identified = "sammy"`; a provider name or `new_source` also work). When it appears, matching
-  items become due at once (`returns::wake`). `jack pending`/`retry` wake from what's present now:
+  items become due at once (`returns::wake`). Walter wakes them from what's present now:
   registered windups (the `windups` table, filled from `--capabilities` profiles) and configured
   providers; `--wake CAP` names one by hand.
 - Whichever comes first. Reaching `complete` (or being merged away) clears the return.
 
-CLI: `jack pending` lists the work with stage, reason and next return; `jack retry` re-runs what is due
-(`--all` forces everything pending). Retries back off; attempts are counted.
+CLI: now Walter's, see below (`walter pending`, `walter patrol`). Jack no longer schedules.
+
+## Round 6 (Adam, 2026-10-28): ids, references, and who does what (schema v7)
+
+**Ids.** Every entry has one permanent local id (`media.id`), never changed or reused. Every work has
+one permanent `works.id`; its key and reference may improve, the id never changes. Service ids (imdb,
+tmdb, tvdb, youtube, …) sit beside them: `external_ids` per entry, `work_ids` per work. A shared
+service id finds the same work; two works sharing ids become a `same_work` proposal, never a merge.
+
+**Work reference.** Built from the most original information: original-language title and original
+release, not translations; includes the episode title when known (`Title (Season s, Episode e) [TV
+series episode]. In Show. (Year).`). Original title and language are stored when sources give them;
+without an original language the reference is marked `provisional` and is upgraded later (never
+downgraded). Online videos are never provisional.
+
+**Architecture.** Jack ONLY fetches and verifies metadata for a file and hands one complete entry
+(`windups::handoff::Handoff`) to Daniel (`windups::handoff::Daniel`). Processing lives elsewhere:
+- **Daniel** stores it. For now a stub in Jack (`daniel.rs`) wraps the existing store code.
+- **Larry** hashes: exact BLAKE3, `partial` by default (head + tail + size), full later as resources
+  permit; and the perceptual fingerprint (still a placeholder). Daniel calls Larry before storing.
+- **Mary** summarises, before Larry/Tom where they depend on it. **Tom** embeds. **Kate** converts
+  images (JPEG embedded, JPEG XL archive). All stubs with a trait and a test.
+- **Walter** patrols (below).
+
+**Look-alike fingerprint (note).** Releases differ in intros, jingles and cuts, so align videos
+first, by audio preferably (cross-correlate audio fingerprints to find the offset), then compare
+frames at matching times. Still a hint only: it proposes, never merges.
+
+**Times** are UTC everywhere.
+
+**No timers, only windups call windups.** No routines, cron or system timers. Walter examines entry
+state (stage, latest reason, `last_checked`, its return) and decides when to call Jack again:
+- `walter pending` lists unfinished work: `#id path [stage] reason — next: <time> UTC or when X appears (attempts n)`.
+- `walter patrol` discovers capabilities (windup profiles via `--capabilities`; their `sources`), wakes
+  items waiting for anything new (a new source also wakes `new_source`), schedules returns, then calls
+  Jack with the files of what is due (`--all` for everything pending; `--wake CAP` by hand).
+- A return reschedules (with the next back-off) whenever the entry's `last_checked` differs from the
+  one it was scheduled against; Jack stamps `last_checked` on every save, Walter after each call.
+- Jack's `pending`/`retry` commands are gone; that logic lives in Walter.

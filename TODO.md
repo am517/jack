@@ -36,4 +36,9 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - Real perceptual fingerprinter (jack `fingerprint.rs`): sampled-frame pHashes via ffmpeg (robust to
   re-encode/resize/crop/rotation/aspect), optional Chromaprint audio; tune `max_distance`. Then a way for
   the user/Sammy to accept/reject `proposals` (accept → `lifecycle::merge`).
-- Returns: run `jack retry` on a timer (systemd/launchd/cron) once Margaret or a scheduler exists; when Sammy registers in the `windups` table, items waiting for him wake automatically on the next pending/retry.
+- Returns: Walter patrols when another windup calls him (no timers, by Adam's rule). Who calls Walter, and how often, is open (Tammy after each ingest?).
+- Move Jack's `store.rs` into a real Daniel crate; Jack keeps only the handoff.
+- Larry: a full-hash pass over partial-hashed files as resources permit.
+- Larry: real perceptual fingerprint, aligning by audio first, then frames.
+- Tom, Mary, Kate: real implementations (Kate converts Jack's art).
+- Walter's name pending Adam's OK.
