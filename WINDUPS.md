@@ -69,3 +69,9 @@ orchestrates others. This file is the contract. Anything shared lives in this re
 - **Modular.** One file does one thing (within reason); small focused modules.
 
 Naming: traditional American English names for now (Adam, 2026-10-28).
+
+## Core rule: no guessing (Adam, 2026-10-28)
+Windups never best-guess or try to be "smart". A windup acts only on sure decisions, when it has enough information
+(e.g. name + year, an id like IMDb/TMDB/TheTVDB, a source URL or yt-dlp info.json, or an unambiguous exact match).
+Otherwise it plainly says "not possible with the available information", keeps everything (all candidates and raw
+data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM windup, through a resolver hook.
