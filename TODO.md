@@ -17,6 +17,9 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - [ ] Embeddings: plug in a small local model (fastembed-rs) behind `Embedder`; embed texts, media, windup profiles; sqlite-vec index when size needs it
 - [ ] Tidy-up windup (name TBD): retry time-based unresolved items after `unresolved_retry_days`
 - [ ] Review what a windup did to a given file (e.g. a macOS QuickLook metadata plugin, or similar). Implementation TBD
+- [ ] Sammy: implement Jack's `Escalation` (per-step decide-or-defer, recorded in `decisions`) and `Explainer`
+- [ ] Post-run review pass (Jack `[review]`, off by default): Sammy implements `Reviewer`; per field in chunks with minimal context; flags only, never rewrites; record flags in `decisions` (step=review) once media ids are at hand
+- [ ] Wikidata and YouTube searches still take one result (srlimit=1 / maxResults=1); keep the full list like the others
 - [ ] Store each windup's PROFILE.toml in the `windups` table (and embed it) on run
 
 ## Later, in order (not started)

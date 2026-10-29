@@ -91,7 +91,51 @@ data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM w
   (auto-filled from a source name, `display_name_set_by` = `auto:<source>` or `user`).
 - When sources about the same work disagree, a `conflicts` row records all values. Nothing is settled by assumption.
 - A file's own embedded metadata is read first and always kept as source `embedded`.
-  It is the truth for facts, not wording: a windup may refine, normalize or expand a value only when
-  it is clearly the same thing ("Joe Rogan" -> "The Joe Rogan Experience"). A contradiction ("Monica Rogan",
-  another year) never replaces it; the file's value stays and a conflict is recorded. Originals are always kept.
+  It is the truth for facts, not wording. A source's value replaces it only when it says the same
+  thing written differently (case, spacing, `.`/`_`/`-`), or when independent evidence confirms the
+  same entity: a shared id, a matching year, the channel mapping, or an explicit flag. Similar wording
+  is never proof ("Joe Rogan" vs "The Joe Rogan Experience"). Without evidence the file's value stays,
+  the file is still tagged with it, a conflict is recorded and the item stays open (`needs_flags`, or
+  `needs_llm_windup` for exact facts). Exact facts (year, date, season, episode) are never replaced.
+  Originals are always kept.
 - Social videos with a matched show get the show as their own parent media row.
+
+## The guiding test
+
+Act like a smart intern from a foreign country: capable with resources, but lacking shared cultural
+knowledge. Make no assumptions. When the information is not enough, skip the step or mark it for
+research; never guess.
+
+## Search: one call, the whole list
+
+One API call per source. A search returns a list in that one call; the whole list is stored as
+candidates (source `<provider>:search`), not just the top hit. A title without a year is a hit only when
+exactly one normalized-exact match exists across all returned lists and the sources agree (same year);
+otherwise the item is unresolved: `ambiguous` (one list has several exact matches) or `needs_flags`
+(sources disagree, or the details fetched are for a different hit), with a hint such as `--year`/`--imdb`.
+
+## Keep everything
+
+Every item is stored, even when incomplete: failed lookups, unreadable names and unresolved matches get
+an entry marked incomplete (an open `unresolved` row with its reason) and all candidates. A windup never
+silently drops an item. Each one is reported to the user as it happens and again at the end of the run,
+with the reason and what would help. Without an LLM, the text comes from static templates in config
+(`[explain]` in jack.toml) behind a swappable `Explainer` (one file), so Sammy can later explain better.
+
+## Escalation at every step
+
+At every step (parse, lookup, match, refine, conflict, ...) a windup 1) tries a deterministic,
+unambiguous answer; 2) if still ambiguous, hands everything it has to an `Escalation`: step kind plus
+full context (reason, detail, merged metadata, every source answer and search hit, the file's own tags)
+in; a decision (values plus a note) or a deferral out. Decisions are recorded with provenance in the
+`decisions` table (source = `sammy`, step, timestamp, values, note). Until Sammy exists the stub
+`NoSammy` always defers, so the fallback is: keep the item as incomplete and explain it with the static
+template. Reason `needs_flags` (schema v3) is for items only the user can settle with a flag.
+
+## Review pass (optional)
+
+After a run, if `[review] enabled` and a reviewer is available, each configured field is reviewed
+across all items in chunks, with minimal context (e.g. title + year beside a description). The reviewer
+(Sammy, `Reviewer` trait; stub `NoReview` is never available) returns flags, not rewrites. Flags are
+logged with provenance (source, step=review, time) and reported as open items (`review_flag`); any
+change still goes through the sure-or-log rules above.

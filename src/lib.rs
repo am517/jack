@@ -1,6 +1,7 @@
 //! Shared library for all windups. One module per concern.
 pub mod conflicts;
 pub mod db;
+pub mod decisions;
 pub mod names;
 pub mod paths;
 pub mod prune;

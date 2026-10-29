@@ -6,6 +6,7 @@ use std::path::Path;
 const MIGRATIONS: &[&str] = &[
     include_str!("../schema/media.sql"),
     include_str!("../schema/002_unresolved_names_conflicts_vectors.sql"),
+    include_str!("../schema/003_needs_flags_decisions.sql"),
 ];
 
 pub fn latest_version() -> i64 {
@@ -54,7 +55,7 @@ mod tests {
         let n: i64 = c.query_row("SELECT count(*) FROM sqlite_master WHERE name='media'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         let n: i64 = c.query_row("SELECT count(*) FROM unresolved_reasons", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 5);
+        assert_eq!(n, 6);
     }
     #[test]
     fn v1_database_upgrades() {
@@ -66,7 +67,7 @@ mod tests {
             c.execute("INSERT INTO media(kind, title) VALUES ('movie', 'Old')", []).unwrap();
         }
         let c = open(&p).unwrap();
-        assert_eq!(version(&c).unwrap(), 2);
+        assert_eq!(version(&c).unwrap(), latest_version());
         let t: String = c.query_row("SELECT title FROM media", [], |r| r.get(0)).unwrap();
         assert_eq!(t, "Old");
     }
