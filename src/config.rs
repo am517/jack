@@ -15,6 +15,9 @@ pub fn apply_env(p: &mut crate::providers::ProvidersCfg, get: impl Fn(&str) -> O
     if p.omdb.api_key.is_empty() && !p.omdb.api_key_env.is_empty() {
         p.omdb.api_key = get(&p.omdb.api_key_env).unwrap_or_default();
     }
+    if p.youtube.api_key.is_empty() && !p.youtube.api_key_env.is_empty() {
+        p.youtube.api_key = get(&p.youtube.api_key_env).unwrap_or_default();
+    }
     let t = &mut p.tmdb;
     if t.read_token.is_empty() && t.api_key.is_empty() {
         let env = |n: &str| {
@@ -302,6 +305,7 @@ mod tests {
         apply_env(&mut p, |_| Some("other".into()));
         assert_eq!(p.thetvdb.api_key, "from-config");
         p.omdb.api_key_env = "OM".into();
+        p.youtube.api_key_env = "YT".into();
         p.tmdb.read_token_env = "TOK".into();
         p.tmdb.api_key_env = "KEY".into();
         apply_env(&mut p, |n| Some(format!("env-{n}")));
@@ -310,6 +314,7 @@ mod tests {
             ("env-TOK", "env-KEY")
         );
         assert_eq!(p.omdb.api_key, "env-OM");
+        assert_eq!(p.youtube.api_key, "env-YT");
         p.tmdb.read_token = "cfg".into();
         p.tmdb.api_key = String::new();
         apply_env(&mut p, |_| Some("x".into()));

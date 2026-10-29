@@ -249,8 +249,12 @@ limit = 5
 
 [providers.youtube]
 
-# Trailer link. Key from https://console.cloud.google.com (YouTube Data API v3). Empty = skipped.
+# Trailer link. Key from https://console.cloud.google.com (YouTube Data API v3). No key = skipped.
+# Free quota is about 100 searches a day; Jack searches each title at most once per run.
 api_key = ""
+
+# When api_key is empty, read the key from this environment variable. Empty = off.
+api_key_env = "YOUTUBE_API_KEY"
 base_url = "https://www.googleapis.com/youtube/v3"
 search_suffix = "trailer"
 watch_url = "https://www.youtube.com/watch?v="
