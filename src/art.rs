@@ -83,7 +83,7 @@ mod tests {
                 ("/tv/42?", json!({"name":"Saiki K","poster_path":"/series.jpg"})),
                 ("/season.jpg", json!(at.clone())),
             ]);
-            let c = cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap()]);
+            let c = cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--name", "Saiki K", "--year", "2016"]);
             for _ in 0..2 {
                 let (out, _, failed) = run(&c, &h).unwrap();
                 assert_eq!(failed, 0, "{out}");
@@ -125,7 +125,7 @@ mod tests {
             ("/tv/42?", json!({"name":"Saiki K","poster_path":"/series.jpg","backdrop_path":"/bd.jpg"})),
             ("/w300/still.jpg", json!(format!("@{}", jpg.display()))),
         ]);
-        let (out, _, failed) = run(&cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--art", "landscape"]), &h).unwrap();
+        let (out, _, failed) = run(&cli(&[m.to_str().unwrap(), "--config", cfgp.to_str().unwrap(), "--art", "landscape", "--name", "Saiki K", "--year", "2016"]), &h).unwrap();
         assert_eq!(failed, 0, "{out}");
         assert!(!h.calls.borrow().iter().any(|c| c.contains("season.jpg") || c.contains("bd.jpg")));
         assert_eq!(Command::new("exiftool").args(["-b", "-CoverArt"]).arg(&m).output().unwrap().stdout, fs::read(&jpg).unwrap());
@@ -160,7 +160,7 @@ mod tests {
         };
         assert_eq!(eff(&[]).as_deref(), Some("B"));
         assert_eq!(eff(&["--art", "poster"]).as_deref(), Some("P"));
-        assert_eq!(eff(&["--art", "landscape"]).as_deref(), Some("B"));
+        assert_eq!(eff(&["--art", "landscape", "--name", "Saiki K", "--year", "2016"]).as_deref(), Some("B"));
     }
 
     #[test]

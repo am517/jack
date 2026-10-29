@@ -107,7 +107,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let cfg = d.path().join("c.toml");
         fs::write(&cfg, "[providers.tmdb]\nread_token = \"t\"\nbase_url = \"http://t\"\n").unwrap();
-        let m = d.path().join("The Matrix.mp4");
+        let m = d.path().join("The Matrix (1999).mp4");
         fs::write(&m, "x").unwrap();
         let h = providers::fake::FakeHttp::new(vec![
             ("/search/movie", json!({"results":[{"id":603}]})),
@@ -117,9 +117,9 @@ mod tests {
         let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d"]);
         let (out, _, failed) = run(&c, &h).unwrap();
         assert_eq!(failed, 0, "{out}");
-        let meta = meta::load(&d.path().join("The Matrix.mp4.meta.json")).unwrap();
+        let meta = meta::load(&d.path().join("The Matrix (1999).mp4.meta.json")).unwrap();
         assert_eq!(meta["year"], "1999");
-        assert_eq!(fs::read(d.path().join("The Matrix.mp4.poster.jpg")).unwrap(), b"JPEG");
+        assert_eq!(fs::read(d.path().join("The Matrix (1999).mp4.poster.jpg")).unwrap(), b"JPEG");
         assert_eq!(fs::read(&m).unwrap(), b"x");
     }
 
@@ -130,7 +130,7 @@ mod tests {
         let cfg = d.path().join("c.toml");
         fs::write(&cfg, "[providers]\norder = [\"tmdb\"]\n[providers.tmdb]\nread_token = \"SECRETTOK\"\nbase_url = \"http://t\"\n").unwrap();
         let cs = cfg.to_str().unwrap();
-        let m = d.path().join("The Matrix.mp4");
+        let m = d.path().join("The Matrix (1999).mp4");
         fs::write(&m, "x").unwrap();
         let ms = m.to_str().unwrap();
         let h = || providers::fake::FakeHttp::new(vec![
@@ -156,8 +156,8 @@ mod tests {
         // -d + --print: both
         let (_, p, _) = run(&cli(&["--config", cs, "-d", "-p", ms]), &h()).unwrap();
         assert!(p.contains("title: The Matrix"));
-        assert_eq!(meta::load(&d.path().join("The Matrix.mp4.meta.json")).unwrap()["title"], "The Matrix");
-        assert!(d.path().join("The Matrix.mp4.poster.jpg").exists());
+        assert_eq!(meta::load(&d.path().join("The Matrix (1999).mp4.meta.json")).unwrap()["title"], "The Matrix");
+        assert!(d.path().join("The Matrix (1999).mp4.poster.jpg").exists());
         assert_eq!(fs::read(&m).unwrap(), b"x");
         // --set saves print + print_format; config then drives json
         run(&cli(&["--set", "--config", cs, "-p", "--print-format", "json"]), &h()).unwrap();
@@ -188,7 +188,7 @@ mod tests {
             ("/series/433631/extended", json!({"data":{"genres":[{"name":"animation"},{"name":"Mystery"}]}})),
             ("/series/433631", json!({"data":{"id":433631,"name":"薬屋のひとりごと","firstAired":"2023-10-22","year":"2027","originalLanguage":"jpn"}})),
         ]);
-        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-p", "-o", "/out", "--grouping", "Anime"]);
+        let c = cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "-d", "-p", "-o", "/out", "--grouping", "Anime", "--name", "The Apothecary Diaries", "--year", "2023"]);
         let (out, p, failed) = run(&c, &h).unwrap();
         assert_eq!(failed, 0, "{out}");
         let meta = meta::load(&d.path().join("The Apothecary Diaries - S03E01 - Locusts.mp4.meta.json")).unwrap();
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(out.matches("image_base").count(), 1, "{out}");
         assert!(out.contains("warning: artwork:"), "art failure is a warning: {out}"); // and meta.json was still saved (loaded above)
         assert!(p.contains("original_show: 薬屋のひとりごと"), "{p}");
-        let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out"]), &h).unwrap();
+        let (out, _, _) = run(&cli(&[m.to_str().unwrap(), "--config", cfg.to_str().unwrap(), "--dry-run", "-o", "/out", "--name", "The Apothecary Diaries", "--year", "2023"]), &h).unwrap();
         assert!(out.contains("/out/The Apothecary Diaries (2023)/Season 3/薬屋のひとりごと S03E01 - 蝗害.mp4"), "{out}");
     }
 }

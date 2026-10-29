@@ -359,3 +359,18 @@ fallback_suffix = ".jack.json"
 
 # Seconds to wait for a busy database before giving up.
 busy_timeout_secs = 5
+
+[online]
+# Online videos (YouTube, X). Jack reads the label first: the yt-dlp .info.json beside the file,
+# then a URL in the file's tags, then a YouTube id in the name. No YouTube search here (quota).
+enabled = true
+readers = ["info_json", "embedded", "filename"]
+info_json_suffix = ".info.json"
+ffprobe = "ffprobe"
+embedded_tags = ["comment", "purl", "description", "synopsis", "url"]
+filename_id_pattern = '\[([A-Za-z0-9_-]{11})\]\.[A-Za-z0-9]+$'
+# Is the channel also a show? Merged only when exactly one TMDB show has exactly its name;
+# several exact names = stored as unresolved with all candidates, not tagged. No guessing.
+crossover_providers = ["tmdb"]
+crossover_max = 5
+crossover_keys = ["show", "tmdb_series_id", "thetvdb_series_id", "imdb_id", "genre", "network"]

@@ -39,12 +39,16 @@ pub(crate) struct Cli {
     pub(crate) config: Option<PathBuf>,
     #[arg(long)]
     pub(crate) imdb: Option<String>,
-    #[arg(long)]
+    #[arg(long, alias = "tvdb")]
     pub(crate) thetvdb: Option<String>,
     #[arg(long)]
     pub(crate) tmdb: Option<String>,
+    /// YouTube video id or URL (an online video; combine with --tmdb/--thetvdb to name its show)
     #[arg(long)]
     pub(crate) youtube: Option<String>,
+    /// X post id or URL
+    #[arg(long)]
+    pub(crate) x: Option<String>,
     /// Title to search for (overrides the filename guess)
     #[arg(long)]
     pub(crate) name: Option<String>,
@@ -129,6 +133,7 @@ impl From<&Cli> for Settings {
             thetvdb: c.thetvdb.clone(),
             tmdb: c.tmdb.clone(),
             youtube: c.youtube.clone(),
+            x: c.x.clone(),
             name: c.name.clone(),
             year: c.year.clone(),
             art_style: c.art.clone(),

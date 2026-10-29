@@ -74,6 +74,7 @@ pub struct Settings {
     pub thetvdb: Option<String>,
     pub tmdb: Option<String>,
     pub youtube: Option<String>,
+    pub x: Option<String>,
     /// Title override (narrows the filename guess; used as the search query).
     pub name: Option<String>,
     /// Year override (search filter).
@@ -105,6 +106,7 @@ impl Settings {
             thetvdb: self.thetvdb.or(l.thetvdb),
             tmdb: self.tmdb.or(l.tmdb),
             youtube: self.youtube.or(l.youtube),
+            x: self.x.or(l.x),
             name: self.name.or(l.name),
             year: self.year.or(l.year),
             art_style: self.art_style.or(l.art_style),
@@ -166,6 +168,7 @@ pub struct Config {
     pub sort: crate::sorter::SortCfg,
     pub naming: crate::sorter::NamingCfg,
     pub store: crate::store::StoreCfg,
+    pub online: crate::online::OnlineCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {

@@ -38,7 +38,9 @@ const ART: [(&str, &str); 4] = [
     ("season_poster_url", "season"),
 ];
 /// Meta key -> (source, scope) in external_ids.
-const IDS: [(&str, &str, &str); 12] = [
+const IDS: [(&str, &str, &str); 14] = [
+    ("youtube_video_id", "youtube", "video"),
+    ("x_video_id", "x", "post"),
     ("wikidata_id", "wikidata", ""),
     ("tvmaze_id", "tvmaze", "show"),
     ("tvmaze_episode_id", "tvmaze", "episode"),
@@ -52,6 +54,37 @@ const IDS: [(&str, &str, &str); 12] = [
     ("thetvdb_series_id", "thetvdb", "series"),
     ("thetvdb_episode_id", "thetvdb", "episode"),
 ];
+
+const SHOW_IDS: [&str; 4] = ["imdb_id", "tmdb_series_id", "thetvdb_series_id", "tmdb_id"];
+
+/// Channel as an entity, crossover show as a group, "unresolved" as a text.
+fn online_extras(tx: &Transaction, id: i64, meta: &Meta) -> rusqlite::Result<()> {
+    if let Some(name) = meta.get("channel") {
+        let site = meta.get("site").map_or("youtube", |s| s.as_str());
+        let by_id = |cid: &String| tx.query_row("SELECT entity_id FROM external_ids WHERE source = ?1 AND scope = 'channel' AND value = ?2 AND entity_id IS NOT NULL", params![site, cid], |r| r.get::<_, i64>(0)).optional();
+        let found = match meta.get("channel_id") {
+            Some(c) => by_id(c)?,
+            None => tx.query_row("SELECT id FROM entities WHERE kind = 'organization' AND name = ?1 AND source = ?2", params![name, site], |r| r.get(0)).optional()?,
+        };
+        let eid = match found {
+            Some(e) => e,
+            None => {
+                tx.execute("INSERT INTO entities(kind, name, source, fetched_at) VALUES ('organization', ?1, ?2, CURRENT_TIMESTAMP)", params![name, site])?;
+                let e = tx.last_insert_rowid();
+                if let Some(c) = meta.get("channel_id") {
+                    tx.execute("INSERT OR IGNORE INTO external_ids(entity_id, source, scope, value) VALUES (?1, ?2, 'channel', ?3)", params![e, site, c])?;
+                }
+                e
+            }
+        };
+        tx.execute("INSERT OR IGNORE INTO media_entities(media_id, entity_id, role, source) VALUES (?1, ?2, 'channel', ?3)", params![id, eid, site])?;
+    }
+    if let Some(show) = meta.get("show") {
+        tx.execute("INSERT OR IGNORE INTO groups(name, kind, source) VALUES (?1, 'show', 'crossover')", [show])?;
+        tx.execute("INSERT OR IGNORE INTO media_groups(media_id, group_id, source) SELECT ?1, id, 'crossover' FROM groups WHERE name = ?2 AND kind = 'show'", params![id, show])?;
+    }
+    Ok(())
+}
 
 fn db_path(cfg: &StoreCfg) -> Result<PathBuf, String> {
     if cfg.database.is_empty() {
@@ -134,7 +167,19 @@ pub fn record(
             tx.execute("INSERT OR IGNORE INTO media_groups(media_id, group_id, source) SELECT ?1, id, 'wikidata' FROM groups WHERE name = ?2 AND kind = ?3", params![id, n, kind])?;
         }
     }
+    let online = meta.get("kind").is_some_and(|k| k == crate::online::KIND);
+    if online {
+        online_extras(&tx, id, meta)?;
+    }
+    // "unresolved": kept with all candidates, so a later run (or Sammy) can decide
+    if let Some(r) = meta.get("resolution") {
+        tx.execute("INSERT INTO texts(media_id, field, source, text, chosen, fetched_at) VALUES (?1, 'resolution', 'jack', ?2, 1, CURRENT_TIMESTAMP)", params![id, r])?;
+    }
     for (k, src, scope) in IDS {
+        // an online video's show ids belong to the show, not to the video
+        if online && SHOW_IDS.contains(&k) {
+            continue;
+        }
         if let Some(v) = meta.get(k) {
             tx.execute("INSERT INTO external_ids(media_id, source, scope, value) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(source, scope, value) DO UPDATE SET media_id = excluded.media_id", params![id, src, scope, v])?;
         }
@@ -191,7 +236,7 @@ fn upsert_media(
     ];
     if let Some(id) = existing {
         tx.execute("DELETE FROM media WHERE canonical_id = ?1", [id])?;
-        for t in ["texts", "art", "media_genres", "media_groups", "ratings"] {
+        for t in ["texts", "art", "media_genres", "media_groups", "ratings", "media_entities"] {
             tx.execute(&format!("DELETE FROM {t} WHERE media_id = ?1"), [id])?;
         }
         tx.execute("UPDATE media SET kind=?1, title=?2, original_title=?3, year=?4, season=?5, episode=?6, rated=?7, status=?8, canonical_id=?9, source=?10, raw_json=?11, fetched_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id = ?12", rusqlite::params_from_iter(vals.iter().copied().chain([&id as &dyn rusqlite::ToSql])))?;
@@ -247,6 +292,22 @@ mod tests {
 
     fn count(c: &Connection, sql: &str) -> i64 {
         c.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn online_video_channel_entity_show_group_and_unresolved() {
+        let d = tempfile::tempdir().unwrap();
+        let mut c = windups::db::open(&d.path().join("m.db")).unwrap();
+        let m: Meta = [("kind", "online_video"), ("title", "Ep"), ("channel", "The Why Files"), ("channel_id", "UC1"), ("site", "youtube"), ("youtube_video_id", "abcdefghijk"), ("show", "The Why Files"), ("tmdb_series_id", "7"), ("resolution", "unresolved")].map(|(k, v)| (k.to_string(), v.to_string())).into();
+        let f = vec![("tmdb".to_string(), m.clone())];
+        record(&mut c, &d.path().join("a.mp4"), &m, &f).unwrap();
+        record(&mut c, &d.path().join("b.mp4"), &[("youtube_video_id", "zzzzzzzzzzz")].iter().fold(m.clone(), |mut a, (k, v)| { a.insert(k.to_string(), v.to_string()); a }), &f).unwrap();
+        assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE kind='organization'"), 1);
+        assert_eq!(count(&c, "SELECT count(*) FROM media_entities WHERE role='channel'"), 2);
+        assert_eq!(count(&c, "SELECT count(*) FROM groups WHERE kind='show'"), 1);
+        assert_eq!(count(&c, "SELECT count(*) FROM external_ids WHERE source='tmdb'"), 0);
+        assert_eq!(count(&c, "SELECT count(*) FROM texts WHERE field='resolution'"), 2);
+        assert_eq!(count(&c, "SELECT count(*) FROM media WHERE status='candidate'"), 2);
     }
 
     #[test]
