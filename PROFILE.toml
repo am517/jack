@@ -1,0 +1,6 @@
+name = "mary"
+role = "summaries"
+summary = "Mary writes short summaries of entries from their stored texts. Runs before Larry and Tom where they depend on it."
+status = "stub"
+reads = ["entry texts (descriptions, plots)"]
+writes = ["summary (via Daniel)"]
