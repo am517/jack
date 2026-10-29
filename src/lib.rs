@@ -1,6 +1,6 @@
 //! Walter, the patrol windup . Nothing incomplete is forgotten:
-//! every call ends in a full patrol (`pending` lists first; `note` = `patrol`); a patrol discovers capabilities, schedules returns, and calls
-//! Jack with whatever is due. No system timers: windups call windups.
+//! `pending` only lists (read-only: no patrol, no windups called); `patrol` (or `note`, the same) is a full
+//! patrol: it discovers capabilities, schedules returns, and calls Jack with whatever is due. No system timers: windups call windups.
 pub mod caller;
 pub mod config;
 pub mod discover;
@@ -55,7 +55,7 @@ fn line(p: &windups::returns::Pending) -> String {
     )
 }
 
-/// `patrol` (or `note`, the same), or `pending` (lists, then patrols). Every call ends in a full
+/// `pending` lists scheduled returns and changes nothing. `patrol` (or `note`, the same) is a full
 /// patrol, stamped as `last_patrol` in `windup_state` so callers (Daniel) can count from it.
 pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<String, String> {
     let a = parse(args)?;
@@ -72,17 +72,21 @@ pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<St
     let c = windups::db::open(&db)?;
     let e = |e: rusqlite::Error| e.to_string();
     let mut out = String::new();
+    if cmd == "pending" {
+        if a.all || !a.wake.is_empty() {
+            return Err("pending only lists; use `walter patrol` for --all or --wake".into());
+        }
+        let all = windups::returns::pending(&c).map_err(e)?;
+        out += &format!("{} pending\n", all.len());
+        all.iter().for_each(|p| out += &line(p));
+        return Ok(out);
+    }
     let woke = discover::discover(&c, &cfg, caller, &a.wake).map_err(e)?;
     if !woke.is_empty() {
         out += &format!("woke items waiting for: {}\n", woke.join(", "));
     }
     patrol::sweep(&c, &cfg.retry).map_err(e)?;
-    if cmd == "pending" {
-        let all = windups::returns::pending(&c).map_err(e)?;
-        out += &format!("{} pending\n", all.len());
-        all.iter().for_each(|p| out += &line(p));
-    }
-    // a data freak: whatever he was called for, Walter patrols the whole database
+    // a data freak: whenever he is called to patrol, Walter patrols the whole database
     let items = if a.all {
         windups::returns::pending(&c)
     } else {

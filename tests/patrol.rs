@@ -69,8 +69,28 @@ fn nothing_incomplete_is_forgotten() {
     };
     let jack = FakeJack::default();
     jack.sources.borrow_mut().push("tmdb");
+    // before any patrol nothing is scheduled, and `pending` is read-only: it schedules nothing, runs nobody
     let out = walter::run("pending", &args(&[]), &jack).unwrap();
-    assert!(out.contains("2 pending"), "complete has no return: {out}");
+    assert!(
+        out.starts_with("0 pending") && !out.contains("due"),
+        "{out}"
+    );
+    assert!(jack.called.borrow().is_empty());
+    assert!(walter::run("pending", &args(&["--wake", "sammy"]), &jack).is_err());
+    // a patrol schedules returns: first back-off is 0 h, so both are due (one has a file) and Jack runs
+    let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    assert!(
+        out.contains("2 due, 1 with a file present") && out.contains("jack ran"),
+        "{out}"
+    );
+    assert_eq!(*jack.called.borrow(), [f.clone()]);
+    // now `pending` lists them (complete has no return), still without calling anyone
+    let out = walter::run("pending", &args(&[]), &jack).unwrap();
+    assert!(
+        out.contains("2 pending") && !out.contains("due"),
+        "complete has no return: {out}"
+    );
+    assert_eq!(jack.called.borrow().len(), 1);
     assert!(
         out.contains("[unverified]") && out.contains("when julie appears"),
         "{out}"
@@ -79,13 +99,6 @@ fn nothing_incomplete_is_forgotten() {
         out.contains("[not_identified]") && out.contains("when sammy appears"),
         "{out}"
     );
-    // even when only asked to list, Walter patrols: first back-off is 0 h, so both are due
-    // (one has a file) and Jack is called with its file
-    assert!(
-        out.contains("2 due, 1 with a file present") && out.contains("jack ran"),
-        "{out}"
-    );
-    assert_eq!(*jack.called.borrow(), [f.clone()]);
     // then it backs off a day
     let out = walter::run("patrol", &args(&[]), &jack).unwrap();
     assert!(out.contains("0 due"), "{out}");
@@ -112,6 +125,6 @@ fn nothing_incomplete_is_forgotten() {
         .unwrap();
     assert_eq!(stamped, 1);
     // Sammy named by hand
-    let out = walter::run("pending", &args(&["--wake", "sammy"]), &jack).unwrap();
+    let out = walter::run("patrol", &args(&["--wake", "sammy"]), &jack).unwrap();
     assert!(out.contains("woke items waiting for: sammy"), "{out}");
 }
