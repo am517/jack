@@ -26,7 +26,10 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - [x] `purpose` and `success_checks` in every PROFILE.toml
 - [x] Rover stub (refining windup); `walter pending` read-only; monorepo
 - [ ] Much later: an (unnamed) profile-managing windup that evaluates, creates and pauses windups
-- [ ] Homebrew tap (am517/homebrew-tap) `jack` formula still points at the old am517/jack repo
+- [x] Homebrew tap `jack` formula points at am517/windups (v0.2.0)
+- [x] .debs (amd64 + arm64) for jack, built by `.github/workflows/debs.yml` on each published release
+- [ ] Signed apt repo (aptly + GitHub Pages; needs a GPG signing key) for jack and the SaiKanji fonts, so `apt upgrade` works
+- [ ] Homebrew bottles for jack (brew builds from source for now)
 
 ## Later, in order (not started)
 1. **Lauren**: tags and embeds from the database (takes over Jack's built-in tagging; Jack keeps a fallback)
