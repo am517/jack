@@ -1,5 +1,5 @@
 //! Mary, the summary windup (stub). Writes a short summary of an entry from its stored texts.
-//! Runs before Larry/Tom where they depend on it (Tom embeds Mary's summary).
+//! Runs before Tom (he embeds her summary); never blocks Larry.
 use windups::handoff::Fields;
 
 pub const PROFILE: &str = include_str!("../PROFILE.toml");
