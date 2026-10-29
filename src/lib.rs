@@ -1,5 +1,5 @@
 //! Walter, the patrol windup . Nothing incomplete is forgotten:
-//! `pending` lists unfinished work; `patrol` discovers capabilities, schedules returns, and calls
+//! every call ends in a full patrol (`pending` lists first; `note` = `patrol`); a patrol discovers capabilities, schedules returns, and calls
 //! Jack with whatever is due. No system timers: windups call windups.
 pub mod caller;
 pub mod config;
@@ -55,7 +55,8 @@ fn line(p: &windups::returns::Pending) -> String {
     )
 }
 
-/// `pending` or `patrol`. Returns the report.
+/// `patrol` (or `note`, the same), or `pending` (lists, then patrols). Every call ends in a full
+/// patrol, stamped as `last_patrol` in `windup_state` so callers (Daniel) can count from it.
 pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<String, String> {
     let a = parse(args)?;
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -76,17 +77,12 @@ pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<St
         out += &format!("woke items waiting for: {}\n", woke.join(", "));
     }
     patrol::sweep(&c, &cfg.retry).map_err(e)?;
-    if cmd == "note" {
-        // called by a windup that just added or changed something: schedule, call nobody, exit
-        let (s, c) = patrol::sweep(&c, &cfg.retry).map_err(e)?;
-        return Ok(out + &format!("noted: {s} scheduled, {c} cleared\n"));
-    }
     if cmd == "pending" {
         let all = windups::returns::pending(&c).map_err(e)?;
         out += &format!("{} pending\n", all.len());
         all.iter().for_each(|p| out += &line(p));
-        return Ok(out);
     }
+    // a data freak: whatever he was called for, Walter patrols the whole database
     let items = if a.all {
         windups::returns::pending(&c)
     } else {
@@ -104,5 +100,11 @@ pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<St
         patrol::touched(&c, &items).map_err(e)?;
         patrol::sweep(&c, &cfg.retry).map_err(e)?;
     }
+    c.execute(
+        "INSERT INTO windup_state(windup, key, value) VALUES ('walter', 'last_patrol', strftime('%Y-%m-%d %H:%M:%f', 'now'))
+         ON CONFLICT(windup, key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+        [],
+    )
+    .map_err(e)?;
     Ok(out)
 }

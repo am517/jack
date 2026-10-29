@@ -2,7 +2,7 @@
 
 # Windups Walter knows how to call (name -> command). He asks each for `--capabilities` on patrol.
 [windups]
-jack = ["jack"]
+jack = ["jack", "--caller", "walter"]  # tagged, so Daniel won't alert Walter back
 
 # Unfinished entries come back after back-off hours (by attempt; the last value repeats), or as
 # soon as the capability their stage waits for appears ("new_source": any source not seen before).

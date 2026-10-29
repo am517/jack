@@ -79,8 +79,8 @@ fn nothing_incomplete_is_forgotten() {
         out.contains("[not_identified]") && out.contains("when sammy appears"),
         "{out}"
     );
-    // first back-off is 0 h: both are due (one has a file) and Jack is called with its file
-    let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    // even when only asked to list, Walter patrols: first back-off is 0 h, so both are due
+    // (one has a file) and Jack is called with its file
     assert!(
         out.contains("2 due, 1 with a file present") && out.contains("jack ran"),
         "{out}"
@@ -99,11 +99,18 @@ fn nothing_incomplete_is_forgotten() {
         out.contains("woke items waiting for: julie") && out.contains("1 due"),
         "{out}"
     );
-    // Daniel's call: schedule only, call nobody
-    let calls = jack.called.borrow().len();
+    // `note` is a full patrol too, and every patrol is stamped for Daniel to count from
     let out = walter::run("note", &args(&[]), &jack).unwrap();
-    assert!(out.contains("noted:"), "{out}");
-    assert_eq!(jack.called.borrow().len(), calls);
+    assert!(out.contains("0 due"), "{out}");
+    let c = windups::db::open(&db).unwrap();
+    let stamped: i64 = c
+        .query_row(
+            "SELECT count(*) FROM windup_state WHERE windup = 'walter' AND key = 'last_patrol'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stamped, 1);
     // Sammy named by hand
     let out = walter::run("pending", &args(&["--wake", "sammy"]), &jack).unwrap();
     assert!(out.contains("woke items waiting for: sammy"), "{out}");
