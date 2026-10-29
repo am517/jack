@@ -1,0 +1,10 @@
+name = "ben"
+role = "builds"
+summary = "Ben rebuilds the windups for new platforms (cross-compiles and packages them) so they stay portable with no system services."
+purpose = "Keep the windups running on every platform Adam uses, with no system services."
+success_checks = [
+  "each windup builds and passes its tests on every target platform",
+  "a release contains every windup for that platform",
+]
+status = "stub"
+command = "ben --capabilities"
