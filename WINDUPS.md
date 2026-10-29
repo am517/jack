@@ -168,3 +168,51 @@ Every file gets an entry, even when nothing could be identified, and entries wal
   windup could not do at all (e.g. could not write a tag).
 - Year tolerance (`[matching] year_tolerance`, default 1) lets sources a year apart agree while
   matching (release dates differ by country). It is a hint only, never evidence.
+
+## Completeness, the user's word, and finding the same thing again (schema v5)
+
+**Complete** means: id-verified, nothing open, and every *required* field for its media kind present.
+The lists live in config (`[completeness]` in jack.toml; defaults: description required everywhere it
+applies, cast optional). Otherwise the entry is *incomplete* and `missing_fields` lists what's absent.
+
+**The user's word.** `--name`/`--year` and a channel mapping are used, but the entry stays *unverified*
+(only an id proves identity) and a decision with source `user_asserted` records it, for Sammy or the
+user to review later.
+
+**Same file, same work, maybe the same thing.** Three different questions, three answers:
+
+| Layer | Stored in | Means | Acts on its own? |
+|---|---|---|---|
+| Exact hash (BLAKE3) | `files.hash` (`b3:` whole file) | identical bytes: **proof** | yes: a file whose old path is gone is re-found under its new path, same entry (also undetermined ones) |
+| Perceptual fingerprint | `files.fingerprint` | same picture/sound after re-encode, resize, crop, rotation, aspect change: **hint** | no: opens a `possible_same` row in `proposals`; never merges |
+| Work key | `works`, `media.work_key` | different versions/encodes of the same work | groups only |
+
+- *Hash mode.* `mode = "full"` (default) hashes the whole file; BLAKE3 runs at disk speed, so the cost is
+  one read per new or changed file. `mode = "partial"` (`b3p:`: size + start/middle/end chunks) reads a
+  few MiB instead — near-certain for video, but a hint, not proof. A copy whose original still exists is
+  its own file, not a re-find.
+- *Fingerprint.* Behind the `Fingerprinter` trait (jack `fingerprint.rs`); thresholds in `[fingerprint]`
+  (`frames`, `audio`, `max_distance`). The shipped `NoFingerprint` stub produces nothing; off by default.
+  Proposals stay `open` until the user or Sammy sets `accepted`/`rejected`; a merge is a separate act.
+- *Work key.* `wk1:` + BLAKE3 of an APA 7-style reference, lower-cased with punctuation and spacing
+  normalized: film `Title. (Year). [Film].`; episode `Show (Season s, Episode e) [TV series episode]. (Year).`;
+  series `Show. (Year). [TV series].`; online video `Channel. (Date). Title [Video]. Site.`
+  Known ids (IMDb, TMDB, TheTVDB, TVmaze, Wikidata, YouTube, X) are stored beside the key in `works.ids`,
+  not inside it, so a newly learned id doesn't change the key. Only identified entries get one.
+
+## Finishing well: nothing incomplete is forgotten (schema v6)
+
+Windups care about finishing. They may pause, or accept a partial answer for now, but they always
+come back until the entry is truly complete. Every entry that isn't `complete` has a row in `returns`:
+
+- **Time-based:** `next_retry_at` (UTC), from `[retry] backoff_hours` by attempt (default 1 h, 1 day,
+  1 week, then monthly). With neither a time nor a resource configured it still returns in a day.
+- **Resource-based:** `waiting_for` names a capability (`[retry.wait_for]` per stage; default
+  `not_identified = "sammy"`; a provider name or `new_source` also work). When it appears, matching
+  items become due at once (`returns::wake`). `jack pending`/`retry` wake from what's present now:
+  registered windups (the `windups` table, filled from `--capabilities` profiles) and configured
+  providers; `--wake CAP` names one by hand.
+- Whichever comes first. Reaching `complete` (or being merged away) clears the return.
+
+CLI: `jack pending` lists the work with stage, reason and next return; `jack retry` re-runs what is due
+(`--all` forces everything pending). Retries back off; attempts are counted.

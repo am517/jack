@@ -110,6 +110,8 @@ pub fn merge(
     )
     .map_err(e)?;
     c.execute("INSERT INTO status_history(media_id, from_state, to_state, actor, reason) VALUES (?1, ?2, 'merged', ?3, ?4)", params![from, prev, actor, reason]).map_err(e)?;
+    // the merged-away entry has nothing left to come back for
+    crate::returns::clear(c, from).map_err(e)?;
     c.execute(
         "INSERT INTO merges(from_id, into_id, actor, reason) VALUES (?1, ?2, ?3, ?4)",
         params![from, into, actor, reason],

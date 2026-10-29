@@ -32,3 +32,8 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 7. **Oliver**: manager/matchmaker (much later; revisit after Margaret)
 8. **Margaret**: receptionist/directory of windups and capabilities (later, once there are too many to know personally)
 - Update windup (files and database together), name TBD
+
+- Real perceptual fingerprinter (jack `fingerprint.rs`): sampled-frame pHashes via ffmpeg (robust to
+  re-encode/resize/crop/rotation/aspect), optional Chromaprint audio; tune `max_distance`. Then a way for
+  the user/Sammy to accept/reject `proposals` (accept → `lifecycle::merge`).
+- Returns: run `jack retry` on a timer (systemd/launchd/cron) once Margaret or a scheduler exists; when Sammy registers in the `windups` table, items waiting for him wake automatically on the next pending/retry.

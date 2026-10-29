@@ -5,9 +5,12 @@ pub mod decisions;
 pub mod lifecycle;
 pub mod names;
 pub mod paths;
+pub mod proposals;
 pub mod prune;
+pub mod returns;
 pub mod settings;
 pub mod unresolved;
 pub mod vectors;
+pub mod works;
 
 pub use settings::Settings;
