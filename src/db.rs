@@ -11,6 +11,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../schema/005_works.sql"),
     include_str!("../schema/006_returns.sql"),
     include_str!("../schema/007_work_ids_walter.sql"),
+    include_str!("../schema/008_windup_state.sql"),
 ];
 
 pub fn latest_version() -> i64 {

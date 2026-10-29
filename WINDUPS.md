@@ -1,5 +1,10 @@
 # The Windups standard (draft 1, 2026-10-27)
 
+## Origin
+
+The windups come from Adam's view of the mind as a hive of many small selves, each with its own
+identity and drive, negotiating influence and woven together into one.
+
 A windup is a small program that does one job well. Windups call each other; a "super" windup
 orchestrates others. This file is the contract. Anything shared lives in this repo.
 
@@ -280,10 +285,7 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
 
 ## Round 7 (Adam, 2026-10-28): who calls whom
 
-- **No daemon, no timers, portable.** Windups call Walter: Daniel calls `walter note --db DB` after
-  storing (Walter schedules returns, calls nobody, exits). Optional: skipped quietly if neither
-  `walter` nor `windups-walter` is on PATH (`[walter]` in daniel.toml). `walter patrol` (which calls
-  Jack) is for a windup that wants work redone; `note` never calls back, so there are no loops.
+- **No daemon, no timers, portable.** Windups call Walter; he runs on the call, then exits.
 - **Daniel is his own crate** (store code moved from Jack). Jack calls him only through
   `windups::handoff::Daniel`, passing the disagreements he found between sources (`conflicts`).
 - **Ruth builds references** (code moved from Jack); Jack only gathers facts. A reference is
@@ -294,3 +296,16 @@ state (stage, latest reason, `last_checked`, its return) and decides when to cal
   `not_identified` for `sammy`, `undetermined`/`incomplete` for `new_source`.
 - **Mary** precedes Tom only; she never blocks Larry.
 - Stubs (profile, README, `--capabilities`): Sammy, Julie, Margaret, Oliver, Ben; and Tom, Mary, Kate.
+
+## Round 8 (Adam, 2026-10-28): Walter the data freak, Daniel the gatekeeper
+
+- **Walter patrols the whole database whenever he is called, for any reason**: `patrol`, `note` (the
+  same) and `pending` (lists, then patrols). Each patrol is stamped as `last_patrol` in
+  `windup_state` (schema v8). Anyone may call him.
+- **Daniel alerts Walter by default, only when it matters.** He counts changes since Walter's last
+  patrol and their importance (`[importance]` weights: new entry 3, stage change 2, update 1) and
+  calls `walter patrol --db DB` when one threshold in `[walter]` is reached: `max_changes` (25),
+  `importance` (10) or `max_hours` (24) since the last patrol. A patrol by anyone restarts the count.
+- **Loop guard.** Walter runs Jack as `jack --caller walter`; Jack carries `caller` in the handoff and
+  Daniel counts that work but never alerts Walter about it.
+- English film references stay provisional until a source gives the original title (confirmed).

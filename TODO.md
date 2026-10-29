@@ -36,7 +36,7 @@ One windup at a time; a new one starts only when the current one is complete (Ad
 - Real perceptual fingerprinter (jack `fingerprint.rs`): sampled-frame pHashes via ffmpeg (robust to
   re-encode/resize/crop/rotation/aspect), optional Chromaprint audio; tune `max_distance`. Then a way for
   the user/Sammy to accept/reject `proposals` (accept → `lifecycle::merge`).
-- Walter: Daniel calls `walter note` after storing; who calls `walter patrol` (re-runs due work) is open (Tammy after each ingest?).
+- Tune Daniel's alert thresholds and importance weights with real use.
 - Ben: rebuild the windups for new platforms (cross-compile, package); keeps everything portable.
 - Julie: real verification (move Jack's verify steps over); Sammy: real judgment.
 - Margaret, Oliver: beyond stubs when needed.

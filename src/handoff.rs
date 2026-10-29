@@ -19,6 +19,9 @@ pub struct Handoff {
     pub conflicts: Vec<Conflict>,
     /// Who hands it over (e.g. "jack").
     pub from: String,
+    /// Who asked for this run, if a windup did (e.g. "walter"): Daniel doesn't alert Walter about
+    /// work Walter himself started (the loop guard).
+    pub caller: Option<String>,
 }
 
 pub trait Daniel {
