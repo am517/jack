@@ -167,7 +167,7 @@ pub struct Config {
     pub matching: crate::matcher::MatchCfg,
     pub sort: crate::sorter::SortCfg,
     pub naming: crate::sorter::NamingCfg,
-    pub store: crate::store::StoreCfg,
+    pub store: daniel::StoreCfg,
     pub online: crate::online::OnlineCfg,
     pub embedded: crate::filemeta::EmbeddedCfg,
     pub explain: crate::explain::ExplainCfg,
