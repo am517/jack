@@ -17,7 +17,11 @@ fn prune_before(dir: &Path, cutoff: SystemTime) -> Result<usize, String> {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.is_dir() {
             removed += prune_before(&path, cutoff)?;
-        } else if path.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < cutoff) {
+        } else if path
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t < cutoff)
+        {
             std::fs::remove_file(&path).map_err(|e| e.to_string())?;
             removed += 1;
         }

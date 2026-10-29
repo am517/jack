@@ -14,10 +14,19 @@ fn to_blob(v: &[f32]) -> Vec<u8> {
 }
 
 fn from_blob(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
 }
 
-pub fn store(c: &Connection, owner: &str, owner_id: &str, model: &str, v: &[f32], content_hash: Option<&str>) -> rusqlite::Result<()> {
+pub fn store(
+    c: &Connection,
+    owner: &str,
+    owner_id: &str,
+    model: &str,
+    v: &[f32],
+    content_hash: Option<&str>,
+) -> rusqlite::Result<()> {
     c.execute(
         "INSERT INTO embeddings(owner, owner_id, model, dim, vector, content_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(owner, owner_id, model) DO UPDATE SET dim = excluded.dim, vector = excluded.vector, content_hash = excluded.content_hash, created_at = CURRENT_TIMESTAMP",
@@ -33,14 +42,30 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
         na += x * x;
         nb += y * y;
     }
-    if na == 0.0 || nb == 0.0 { 0.0 } else { d / (na.sqrt() * nb.sqrt()) }
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        d / (na.sqrt() * nb.sqrt())
+    }
 }
 
 /// Top `k` (owner, owner_id, score) for `query`, among vectors of the same model and size.
-pub fn search(c: &Connection, model: &str, query: &[f32], k: usize) -> rusqlite::Result<Vec<(String, String, f32)>> {
-    let mut st = c.prepare("SELECT owner, owner_id, vector FROM embeddings WHERE model = ?1 AND dim = ?2")?;
+pub fn search(
+    c: &Connection,
+    model: &str,
+    query: &[f32],
+    k: usize,
+) -> rusqlite::Result<Vec<(String, String, f32)>> {
+    let mut st =
+        c.prepare("SELECT owner, owner_id, vector FROM embeddings WHERE model = ?1 AND dim = ?2")?;
     let mut hits: Vec<(String, String, f32)> = st
-        .query_map(params![model, query.len() as i64], |r| Ok((r.get(0)?, r.get(1)?, cosine(query, &from_blob(&r.get::<_, Vec<u8>>(2)?)))))?
+        .query_map(params![model, query.len() as i64], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                cosine(query, &from_blob(&r.get::<_, Vec<u8>>(2)?)),
+            ))
+        })?
         .collect::<Result<_, _>>()?;
     hits.sort_by(|a, b| b.2.total_cmp(&a.2));
     hits.truncate(k);
@@ -59,7 +84,10 @@ mod tests {
         store(&c, "text", "2", "m1", &[0.6, 0.8], Some("h")).unwrap();
         store(&c, "text", "3", "m2", &[1.0, 0.0, 0.0], None).unwrap();
         let r = search(&c, "m1", &[1.0, 0.1], 5).unwrap();
-        assert_eq!(r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            r.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(),
+            ["1", "2"]
+        );
         assert_eq!(from_blob(&to_blob(&[1.5, -2.0])), [1.5, -2.0]);
     }
 }

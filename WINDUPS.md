@@ -92,8 +92,10 @@ data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM w
 - When sources about the same work disagree, a `conflicts` row records all values. Nothing is settled by assumption.
 - A file's own embedded metadata is read first and always kept as source `embedded`.
   It is the truth for facts, not wording. A source's value replaces it only when it says the same
-  thing written differently (case, spacing, `.`/`_`/`-`), or when independent evidence confirms the
-  same entity: a shared id, a matching year, the channel mapping, or an explicit flag. Similar wording
+  thing written differently (case, spacing, `.`/`_`/`-`), or when evidence confirms the same
+  entity. Only an id is proof (one shared with the file, or one the user gave: --imdb/--tmdb/--thetvdb).
+  The user's own word (--name with --year, or their channel mapping) settles names but not identity.
+  A matching name or year is a strong hint for checking, never confirmation. Similar wording
   is never proof ("Joe Rogan" vs "The Joe Rogan Experience"). Without evidence the file's value stays,
   the file is still tagged with it, a conflict is recorded and the item stays open (`needs_flags`, or
   `needs_llm_windup` for exact facts). Exact facts (year, date, season, episode) are never replaced.
@@ -139,3 +141,30 @@ across all items in chunks, with minimal context (e.g. title + year beside a des
 (Sammy, `Reviewer` trait; stub `NoReview` is never available) returns flags, not rewrites. Flags are
 logged with provenance (source, step=review, time) and reported as open items (`review_flag`); any
 change still goes through the sure-or-log rules above.
+
+## Lifecycle: identification is a process, not a goal (schema v4)
+
+Every file gets an entry, even when nothing could be identified, and entries walk stages over time:
+
+| stage | meaning |
+|---|---|
+| `undetermined` | file purgatory: only the file's and the user's own values (lookup failed or not done) |
+| `not_identified` | looked up, but no answer could be settled on (the open `unresolved` row says why) |
+| `unverified` | matched by strong hints (name, year, user's --name/--year, channel mapping), not by an id |
+| `incomplete` | identified by an id; something is still open (a conflict, a needed flag) |
+| `complete` | identified by an id; nothing open |
+| `merged` | folded into another entry (`merged_into`); final |
+
+- Stages and allowed moves are rows (`lifecycle_states`, `lifecycle_transitions`): add a stage without
+  code. Any working stage may move to any other (an id can turn out wrong), or be merged; merged is final.
+- Every move is kept in `status_history` (from, to, actor, reason, time).
+- Entries are never deleted (a trigger refuses it) and ids are never reused. An entry is identified in
+  place (a re-run of the same file updates the same id) or merged into another: files and ids move over,
+  the old entry stays with `merged_into` set, and `merges` records who, why and when. Lookups follow
+  `merged_into` to the entry that stands now.
+- `unresolved` stays the list of open questions (why, and what would help); the stage says where the
+  entry is. Migration v4 put existing entries on `not_identified` (open unresolved) or `unverified`.
+- A run counts entries by stage. Incomplete entries are kept, not failures; a failure is something a
+  windup could not do at all (e.g. could not write a tag).
+- Year tolerance (`[matching] year_tolerance`, default 1) lets sources a year apart agree while
+  matching (release dates differ by country). It is a hint only, never evidence.

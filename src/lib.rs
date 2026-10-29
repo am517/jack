@@ -2,6 +2,7 @@
 pub mod conflicts;
 pub mod db;
 pub mod decisions;
+pub mod lifecycle;
 pub mod names;
 pub mod paths;
 pub mod prune;

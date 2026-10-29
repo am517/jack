@@ -5,7 +5,9 @@ use std::path::PathBuf;
 pub fn expand(p: &str) -> PathBuf {
     match (p.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
-        _ if p == "~" => std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| p.into()),
+        _ if p == "~" => std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| p.into()),
         _ => PathBuf::from(p),
     }
 }

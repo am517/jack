@@ -7,6 +7,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../schema/media.sql"),
     include_str!("../schema/002_unresolved_names_conflicts_vectors.sql"),
     include_str!("../schema/003_needs_flags_decisions.sql"),
+    include_str!("../schema/004_lifecycle_merges.sql"),
 ];
 
 pub fn latest_version() -> i64 {
@@ -26,18 +27,24 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 }
 
 pub fn version(conn: &Connection) -> Result<i64, String> {
-    conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(|e| e.to_string())
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|e| e.to_string())
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), String> {
     let current = version(conn)?;
     if current > latest_version() {
-        return Err(format!("media.db is version {current}, newer than this windup knows ({}); please update", latest_version()));
+        return Err(format!(
+            "media.db is version {current}, newer than this windup knows ({}); please update",
+            latest_version()
+        ));
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute_batch(sql).map_err(|e| format!("migration {}: {e}", i + 1))?;
-        tx.pragma_update(None, "user_version", (i + 1) as i64).map_err(|e| e.to_string())?;
+        tx.execute_batch(sql)
+            .map_err(|e| format!("migration {}: {e}", i + 1))?;
+        tx.pragma_update(None, "user_version", (i + 1) as i64)
+            .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -52,9 +59,17 @@ mod tests {
         let p = dir.path().join("sub/media.db");
         let c = open(&p).unwrap();
         assert_eq!(version(&c).unwrap(), latest_version());
-        let n: i64 = c.query_row("SELECT count(*) FROM sqlite_master WHERE name='media'", [], |r| r.get(0)).unwrap();
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='media'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 1);
-        let n: i64 = c.query_row("SELECT count(*) FROM unresolved_reasons", [], |r| r.get(0)).unwrap();
+        let n: i64 = c
+            .query_row("SELECT count(*) FROM unresolved_reasons", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 6);
     }
     #[test]
@@ -64,11 +79,14 @@ mod tests {
         {
             let c = rusqlite::Connection::open(&p).unwrap();
             c.execute_batch(MIGRATIONS[0]).unwrap();
-            c.execute("INSERT INTO media(kind, title) VALUES ('movie', 'Old')", []).unwrap();
+            c.execute("INSERT INTO media(kind, title) VALUES ('movie', 'Old')", [])
+                .unwrap();
         }
         let c = open(&p).unwrap();
         assert_eq!(version(&c).unwrap(), latest_version());
-        let t: String = c.query_row("SELECT title FROM media", [], |r| r.get(0)).unwrap();
+        let t: String = c
+            .query_row("SELECT title FROM media", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(t, "Old");
     }
     #[test]
