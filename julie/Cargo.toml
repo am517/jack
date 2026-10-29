@@ -1,0 +1,8 @@
+[package]
+name = "julie"
+version = "0.1.0"
+edition = "2024"
+description = "Julie: verification (stub)"
+license = "MIT"
+
+[dependencies]

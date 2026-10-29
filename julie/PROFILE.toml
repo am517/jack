@@ -1,0 +1,11 @@
+name = "julie"
+role = "verification"
+summary = "Julie verifies entries against evidence (ids, the file's own facts, independent sources) and calls Sammy when judgment is needed. Verifying and thinking are separate."
+purpose = "Check entries against evidence, so what is stored is true."
+success_checks = [
+  "every verdict cites its evidence",
+  "Julie never decides between candidates herself; judgment goes to Sammy",
+  "an entry is verified only by evidence (an id), never by name and year alone",
+]
+status = "stub"
+command = "julie --capabilities"
