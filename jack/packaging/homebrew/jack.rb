@@ -2,7 +2,7 @@ class Jack < Formula
   desc "Tag and sort movie and TV files using TMDB and TheTVDB metadata"
   homepage "https://github.com/am517/windups"
   url "https://github.com/am517/windups/archive/refs/tags/v0.2.0.tar.gz"
-  sha256 "SHA256"
+  sha256 "f15a9eeea46e2468841e21c0017f3ab387488ba9b017ba3886e10e12bbd1df03"
   license "MIT"
   head "https://github.com/am517/windups.git", branch: "main"
 
