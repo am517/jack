@@ -13,6 +13,9 @@ Ratings, rated and awards from OMDb (The Open Movie Database): https://www.omdba
 pub(crate) struct Cli {
     /// Files or directories to process
     pub(crate) paths: Vec<PathBuf>,
+    /// Print Jack's profile (what he does, reads, writes) and exit
+    #[arg(long)]
+    pub(crate) capabilities: bool,
     /// Save the other option flags as defaults in the main config (then run, if paths are given)
     #[arg(long)]
     pub(crate) set: bool,

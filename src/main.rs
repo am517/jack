@@ -2,11 +2,14 @@ mod art;
 mod askart;
 mod cli;
 mod config;
+mod conflicts;
 mod fetch;
+mod filemeta;
 mod matcher;
 mod meta;
 mod online;
 mod print;
+mod profile;
 mod process;
 mod providers;
 mod resolver;
@@ -26,6 +29,10 @@ use clap::Parser;
 
 fn main() {
     let mut cli = cli::Cli::parse();
+    if cli.capabilities {
+        print!("{}", profile::PROFILE);
+        return;
+    }
     if let Err(e) = secrets::resolve_secrets(&mut cli, &mut secrets::read_secret) {
         eprintln!("jack: {e}");
         std::process::exit(1);

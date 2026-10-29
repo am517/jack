@@ -1,0 +1,15 @@
+# Jack's profile: the source of truth for who Jack is and what Jack does.
+# `jack --capabilities` prints this file. It is also stored (and embedded for meaning search)
+# in media.db's windups table so Margaret and other windups can find Jack.
+name = "jack"
+role = "metadata"
+summary = "Jack is the boss of all metadata. He reads a media file's own label first, looks it up in online databases, keeps everything he finds, and acts only on sure decisions."
+status = "active"
+kinds = ["movie", "episode", "online_video"]
+later_kinds = ["book", "document"]
+sources = ["embedded", "tmdb", "thetvdb", "omdb", "tvmaze", "wikidata", "itunes", "youtube", "wikipedia", "yt-dlp info.json"]
+reads = ["media files", "yt-dlp .info.json"]
+writes = ["media.db (media, candidates, texts, art, ids, ratings, names, conflicts, unresolved)", "file tags (fallback until Lauren)", "sorted folders (fallback until Sally)"]
+never = ["guess between candidates", "overwrite a source's data", "tag from an unresolved decision"]
+hands_off = ["sammy: ambiguous or conflicting cases (needs_llm_windup)"]
+command = "jack [--capabilities] [--tmdb ID | --thetvdb ID | --imdb ID | --youtube ID | --x ID | --name NAME --year YEAR] PATH..."

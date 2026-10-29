@@ -33,14 +33,15 @@ impl Resolver for Strict {
     }
 }
 
-/// Same title (ignoring only case and spacing) and, if a year is given, same year.
+/// Same title (ignoring case, spacing and the separators . _ -) and, if a year is given, same year.
 pub fn exact(title: &str, year: Option<&str>, m: &Meta) -> bool {
     let t = m.get("show").or(m.get("title")).map_or("", |s| s);
     norm(t) == norm(title) && !norm(title).is_empty() && year.is_none_or(|y| m.get("year").is_some_and(|my| my == y))
 }
 
-fn norm(s: &str) -> String {
-    s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+/// "Breaking.Bad" / "breaking_bad" / "Breaking  Bad" -> "breaking bad". Other punctuation stays.
+pub fn norm(s: &str) -> String {
+    s.to_lowercase().replace(['.', '_', '-'], " ").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -60,5 +61,7 @@ mod tests {
         assert_eq!(s.resolve("the  why files", None, &[c("The Why Files", "2021")]), Choice::Pick(0));
         assert_eq!(s.resolve("Joe Rogan Experience", None, &[c("The Joe Rogan Experience", "2009")]), Choice::None);
         assert_eq!(s.resolve("Dr. Shawn Baker", None, &[]), Choice::None);
+        assert_eq!(s.resolve("breaking.bad", None, &[c("Breaking Bad", "2008")]), Choice::Pick(0));
+        assert_eq!(s.resolve("Breaking_Bad", None, &[c("Breaking-Bad", "2008")]), Choice::Pick(0));
     }
 }

@@ -146,6 +146,8 @@ pub fn fetch(label: &Label, forced: &Meta, cfg: &Config, http: &dyn Http, res: &
                     found.push((src.clone(), m.clone()));
                 }
                 meta.insert("resolution".into(), "unresolved".into());
+                meta.insert("unresolved_reason".into(), "ambiguous".into());
+                meta.insert("unresolved_detail".into(), format!("\"{name}\" could be {}", list.join(" / ")));
             }
         }
     }

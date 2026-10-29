@@ -360,6 +360,26 @@ fallback_suffix = ".jack.json"
 # Seconds to wait for a busy database before giving up.
 busy_timeout_secs = 5
 
+[embedded]
+# Read the file's own metadata first. It is always kept as source "embedded" and compared with
+# the other sources (disagreements go to the conflicts table); it never overrides them.
+enabled = true
+
+# Container tag (lowercase, as ffprobe reports it) -> Jack field.
+[embedded.tags]
+title = "title"
+show = "show"
+tvshow = "show"
+season_number = "season"
+episode_sort = "episode"
+episode_id = "episode_title"
+date = "date"
+year = "year"
+description = "description"
+synopsis = "description"
+comment = "comment"
+genre = "genre"
+
 [online]
 # Online videos (YouTube, X). Jack reads the label first: the yt-dlp .info.json beside the file,
 # then a URL in the file's tags, then a YouTube id in the name. No YouTube search here (quota).

@@ -11,7 +11,12 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
     let dry = Settings::flag(s.dry_run);
     let (print, dl) = (Settings::flag(s.print), Settings::flag(s.download_only));
     let msuf = s.meta_suffix.as_deref().unwrap_or(".meta.json");
-    let (mut meta, found, unresolved) = match online_label(path, s, cfg) {
+    // the label first: the file's own metadata, kept as a source of its own
+    let own = if cfg.embedded.enabled { crate::filemeta::read(path, &cfg.online.ffprobe, &cfg.embedded.tags) } else { Meta::new() };
+    if !own.is_empty() {
+        let _ = writeln!(out, "    embedded: {}", own.keys().cloned().collect::<Vec<_>>().join(", "));
+    }
+    let (mut meta, mut found, unresolved) = match online_label(path, s, cfg) {
         Some(l) => {
             let o = online::fetch(&l, &show_flags(s), cfg, http, &crate::resolver::Strict, out)?;
             (o.meta, o.found, o.unresolved)
@@ -23,10 +28,16 @@ pub(crate) fn process(path: &Path, s: &Settings, cfg: &Config, http: &dyn Http, 
             if !sure {
                 let _ = writeln!(out, "    not possible with the available information: \"{}\"{} (give --name and --year, or an id)", q.title, q.year.as_deref().map(|y| format!(" ({y})")).unwrap_or_default());
                 m.insert("resolution".into(), "unresolved".into());
+                let named = f.iter().any(|(_, m)| crate::resolver::exact(&q.title, None, m));
+                m.insert("unresolved_reason".into(), if named { "ambiguous" } else { "no_match" }.into());
+                m.insert("unresolved_detail".into(), q.title.clone());
             }
             (m, f, !sure)
         }
     };
+    if !own.is_empty() {
+        found.push(("embedded".into(), own));
+    }
     let t = &cfg.tagger;
     // art is kept beside the file only with -d; otherwise it's a temp file removed after tagging
     let pp = art_path(path, s, dl);
@@ -153,8 +164,14 @@ pub(crate) fn sure(q: &crate::providers::Query, s: &Settings, found: &[(String, 
     if q.imdb.is_some() || q.tmdb.is_some() || q.thetvdb.is_some() || (set(&s.name) && set(&s.year)) {
         return true;
     }
-    let Some(y) = q.year.as_deref() else { return false };
     let year_of = |m: &Meta| m.get("series_year").or(m.get("year")).cloned();
+    let Some(y) = q.year.as_deref() else {
+        // no year: sure only if every exact title match is the same work (one year among them)
+        let mut years: Vec<String> = found.iter().filter(|(_, m)| crate::resolver::exact(&q.title, None, m)).filter_map(|(_, m)| year_of(m)).map(|y| y.chars().take(4).collect()).collect();
+        years.sort();
+        years.dedup();
+        return years.len() == 1;
+    };
     found.iter().any(|(_, m)| {
         let mut m = m.clone();
         if let Some(y) = year_of(&m) {
@@ -177,7 +194,10 @@ mod tests {
         let none = Settings::default();
         assert!(sure(&q("The Matrix", Some("1999")), &none, &m("The Matrix", "1999")));
         assert!(!sure(&q("The Matrix", Some("1999")), &none, &m("The Matrix Reloaded", "2003")));
-        assert!(!sure(&q("Breaking Bad", None), &none, &m("Breaking Bad", "2008")));
+        assert!(sure(&q("breaking.bad", None), &none, &m("Breaking Bad", "2008")));
+        let two = [m("The Office", "2005"), m("The Office", "2001")].concat();
+        assert!(!sure(&q("The Office", None), &none, &two));
+        assert!(!sure(&q("Breaking Bad", None), &none, &m("Breaking Bad: Original Minisodes", "2009")));
         let named = Settings { name: Some("Breaking Bad".into()), year: Some("2008".into()), ..Default::default() };
         assert!(sure(&q("Breaking Bad", Some("2008")), &named, &[]));
         assert!(sure(&Query { imdb: Some("tt1".into()), ..q("x", None) }, &none, &[]));

@@ -169,6 +169,7 @@ pub struct Config {
     pub naming: crate::sorter::NamingCfg,
     pub store: crate::store::StoreCfg,
     pub online: crate::online::OnlineCfg,
+    pub embedded: crate::filemeta::EmbeddedCfg,
 }
 
 pub fn expand(p: &Path) -> PathBuf {
