@@ -1,0 +1,17 @@
+# Larry's defaults. Override in ~/.config/windups/larry/config.toml.
+
+# Exact content hash (BLAKE3), per file, to re-find renamed or moved files.
+# mode "partial" (default, first pass): size + start/middle/end chunks; fast, a strong hint.
+# mode "full": the whole file; an equal hash proves an identical file (later, as resources permit).
+[hash]
+enabled = true
+mode = "partial"
+chunk_bytes = 1048576
+full_below_bytes = 16777216
+
+# Look-alike fingerprint: placeholder. A close match only opens a "possible_same" proposal.
+[fingerprint]
+enabled = false
+frames = 16
+audio = false
+max_distance = 0.15
