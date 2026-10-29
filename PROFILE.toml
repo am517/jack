@@ -1,6 +1,13 @@
 name = "daniel"
 role = "database"
 summary = "Daniel takes one entry per file from any windup, adds Larry's hash and Ruth's reference, stores everything in media.db (or JSON beside the file if there's no database), then alerts Walter when enough has changed (thresholds in daniel.toml), never for work Walter started."
+purpose = "Keep everything the windups learn, safely and whole, in one shared database."
+success_checks = [
+  "every handoff is stored, or saved as JSON beside the file when there is no database",
+  "re-storing the same file updates its entry; ids never change or get reused",
+  "nothing is merged automatically; fingerprint hints only open proposals",
+  "Walter is alerted when a threshold is reached and never for work Walter started",
+]
 status = "library (real store code); called by Jack through windups::handoff::Daniel"
 reads = ["handoffs"]
 writes = ["media.db (media, candidates, texts, art, ids, ratings, names, conflicts, unresolved, decisions, lifecycle, files and hashes, works and their ids, proposals, last_checked)", "JSON beside the file when no database"]
