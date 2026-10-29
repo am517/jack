@@ -89,6 +89,10 @@ impl Query {
 pub trait Provider {
     fn name(&self) -> &'static str;
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String>;
+    /// False: this provider does not cover this kind of query (e.g. TV-only for a movie); skipped silently.
+    fn handles(&self, _q: &Query) -> bool {
+        true
+    }
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -160,6 +164,8 @@ pub struct ProvidersCfg {
     /// Genres from all providers: "lower", "title" or "asis"; joined with genre_separator.
     pub genre_case: String,
     pub genre_separator: String,
+    /// Normalized genre (lowercase, '-'/'_' as spaces) -> the name to use, e.g. "sci fi" = "science fiction".
+    pub genre_aliases: std::collections::BTreeMap<String, String>,
     pub tmdb: TmdbCfg,
     pub thetvdb: TvdbCfg,
     pub omdb: OmdbCfg,
@@ -184,18 +190,38 @@ fn join_names(v: &Value) -> Option<String> {
     (!n.is_empty()).then(|| n.join(", "))
 }
 
+/// "Science-Fiction" -> "science fiction": the form genres are compared in.
+pub fn genre_key(g: &str) -> String {
+    g.to_lowercase()
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// All genres (comma lists) merged: deduped case-insensitively, cased, sorted, joined.
 pub fn merge_genres<'a>(
     lists: impl Iterator<Item = &'a str>,
     case: &str,
     sep: &str,
+    aliases: &std::collections::BTreeMap<String, String>,
 ) -> Option<String> {
     let mut out: Vec<String> = vec![];
+    let mut seen: Vec<String> = vec![];
     for g in lists
         .flat_map(|l| l.split(','))
         .map(str::trim)
         .filter(|g| !g.is_empty() && *g != "N/A")
     {
+        let key = genre_key(g);
+        let (g, key) = match aliases.get(&key) {
+            Some(a) => (a.as_str(), genre_key(a)),
+            None => (g, key),
+        };
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
         let g = match case {
             "lower" => g.to_lowercase(),
             "title" => g
@@ -266,6 +292,18 @@ fn digits_after(x: &str, marker: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_digit())
         .collect();
     (!d.is_empty()).then_some(d)
+}
+
+/// "The Office (US)" -> "The Office": a 2-3 letter uppercase country tag in parentheses.
+pub fn strip_country_suffix(n: &str) -> String {
+    let t = n.trim_end();
+    if let Some(i) = t.rfind(" (") {
+        let tag = &t[i + 2..t.len().saturating_sub(1)];
+        if t.ends_with(')') && (2..=3).contains(&tag.len()) && tag.chars().all(|c| c.is_ascii_uppercase()) {
+            return t[..i].to_string();
+        }
+    }
+    t.to_string()
 }
 
 /// TheTVDB disambiguates duplicate names with a trailing " (YYYY)"; strip it.
@@ -1046,7 +1084,7 @@ impl Provider for Omdb<'_> {
             None => {
                 url += &format!(
                     "&t={}&type={}",
-                    enc(&q.title),
+                    enc(&strip_year_suffix(&strip_country_suffix(&q.title))),
                     if q.is_tv() { "series" } else { "movie" }
                 );
                 if let Some(y) = &q.year {
@@ -1190,6 +1228,14 @@ mod tests {
     }
 
     #[test]
+    fn country_suffix_stripped() {
+        assert_eq!(strip_country_suffix("The Office (US)"), "The Office");
+        assert_eq!(strip_country_suffix("Doctor Who (2005)"), "Doctor Who (2005)");
+        assert_eq!(strip_year_suffix(&strip_country_suffix("Doctor Who (2005)")), "Doctor Who");
+        assert_eq!(strip_country_suffix("Friends"), "Friends");
+    }
+
+    #[test]
     fn genres_merged() {
         let l = [
             "Animation, Comedy",
@@ -1198,14 +1244,19 @@ mod tests {
             "Sci-Fi & Fantasy",
         ];
         assert_eq!(
-            merge_genres(l.iter().copied(), "lower", ",").unwrap(),
+            merge_genres(l.iter().copied(), "lower", ",", &Default::default()).unwrap(),
             "animation,comedy,family,sci-fi & fantasy"
         );
         assert_eq!(
-            merge_genres(["action ADVENTURE"].into_iter(), "title", ", ").unwrap(),
+            merge_genres(["action ADVENTURE"].into_iter(), "title", ", ", &Default::default()).unwrap(),
             "Action Adventure"
         );
-        assert!(merge_genres([""].into_iter(), "lower", ",").is_none());
+        let al = [("sci fi".to_string(), "science fiction".to_string())].into();
+        assert_eq!(
+            merge_genres(["Science Fiction, drama", "science-fiction,Sci-Fi", "DRAMA"].into_iter(), "lower", ",", &al).unwrap(),
+            "drama,science fiction"
+        );
+        assert!(merge_genres([""].into_iter(), "lower", ",", &Default::default()).is_none());
     }
 
     #[test]

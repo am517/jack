@@ -159,6 +159,10 @@ original_in_description = false
 genre_case = "lower"
 genre_separator = ","
 
+# Genres are compared lowercase with '-'/'_' as spaces ("Science-Fiction" = "science fiction").
+# Aliases map such a normalized name to the one to keep.
+genre_aliases = { "sci fi" = "science fiction", "scifi" = "science fiction" }
+
 # 2-letter to 3-letter language codes (for TheTVDB).
 language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", it = "ita", pt = "por", ko = "kor", zh = "zho", ru = "rus", nl = "nld", sv = "swe" }
 

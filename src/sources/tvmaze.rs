@@ -75,6 +75,9 @@ impl Provider for Tvmaze<'_> {
     fn name(&self) -> &'static str {
         "tvmaze"
     }
+    fn handles(&self, q: &Query) -> bool {
+        q.is_tv()
+    }
     fn lookup(&self, q: &Query) -> Result<Option<Meta>, String> {
         if !q.is_tv() {
             return Ok(None);
@@ -194,6 +197,7 @@ mod tests {
             .unwrap()
             .is_none()
         );
+        assert!(!t.handles(&Query { kind: Some("movie".into()), ..Default::default() }));
     }
 
     #[test]
