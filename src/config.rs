@@ -6,6 +6,15 @@ use std::path::Path;
 #[serde(default)]
 pub struct Config {
     pub walter: WalterCfg,
+    pub importance: Importance,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(default)]
+pub struct Importance {
+    pub new_entry: u32,
+    pub stage_change: u32,
+    pub update: u32,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -13,6 +22,9 @@ pub struct Config {
 pub struct WalterCfg {
     pub enabled: bool,
     pub command: Vec<String>,
+    pub max_changes: u32,
+    pub importance: u32,
+    pub max_hours: f64,
 }
 
 const DEFAULTS: &str = include_str!("../config/daniel.toml");

@@ -12,14 +12,19 @@ pub fn find(name: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
 
 /// Runs the configured Walter command against `db`. Returns what happened, or None if skipped.
 pub fn notify(cmd: &[String], db: &Path) -> Option<String> {
-    let exe = find(cmd.first()?, std::env::var_os("PATH").as_deref())?;
+    let first = cmd.first()?;
+    let exe = if first.contains('/') {
+        Some(PathBuf::from(first)).filter(|p| p.is_file())?
+    } else {
+        find(first, std::env::var_os("PATH").as_deref())?
+    };
     let r = std::process::Command::new(&exe)
         .args(&cmd[1..])
         .arg("--db")
         .arg(db)
         .output();
     Some(match r {
-        Ok(o) if o.status.success() => "walter noted it".into(),
+        Ok(o) if o.status.success() => "walter patrolled".into(),
         Ok(o) => format!("walter: {}", String::from_utf8_lossy(&o.stderr).trim()),
         Err(e) => format!("walter: {e}"),
     })
