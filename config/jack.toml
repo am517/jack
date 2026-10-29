@@ -161,7 +161,8 @@ genre_separator = ","
 
 # Genres are compared lowercase with '-'/'_' as spaces ("Science-Fiction" = "science fiction").
 # Aliases map such a normalized name to the one to keep.
-genre_aliases = { "sci fi" = "science fiction", "scifi" = "science fiction" }
+# An alias may name several genres, comma-separated.
+genre_aliases = { "sci fi" = "science fiction", "scifi" = "science fiction", "sci fi & fantasy" = "science fiction, fantasy", "action & adventure" = "action, adventure", "war & politics" = "war, politics" }
 
 # 2-letter to 3-letter language codes (for TheTVDB).
 language_codes = { en = "eng", ja = "jpn", fr = "fra", de = "deu", es = "spa", it = "ita", pt = "por", ko = "kor", zh = "zho", ru = "rus", nl = "nld", sv = "swe" }

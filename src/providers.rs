@@ -208,16 +208,18 @@ pub fn merge_genres<'a>(
 ) -> Option<String> {
     let mut out: Vec<String> = vec![];
     let mut seen: Vec<String> = vec![];
-    for g in lists
+    // an alias may name several genres: "sci fi & fantasy" = "science fiction, fantasy"
+    let names: Vec<String> = lists
         .flat_map(|l| l.split(','))
         .map(str::trim)
         .filter(|g| !g.is_empty() && *g != "N/A")
-    {
+        .flat_map(|g| match aliases.get(&genre_key(g)) {
+            Some(a) => a.split(',').map(|x| x.trim().to_string()).collect(),
+            None => vec![g.to_string()],
+        })
+        .collect();
+    for g in names.iter().map(String::as_str) {
         let key = genre_key(g);
-        let (g, key) = match aliases.get(&key) {
-            Some(a) => (a.as_str(), genre_key(a)),
-            None => (g, key),
-        };
         if seen.contains(&key) {
             continue;
         }
@@ -1251,10 +1253,10 @@ mod tests {
             merge_genres(["action ADVENTURE"].into_iter(), "title", ", ", &Default::default()).unwrap(),
             "Action Adventure"
         );
-        let al = [("sci fi".to_string(), "science fiction".to_string())].into();
+        let al = [("sci fi", "science fiction"), ("sci fi & fantasy", "science fiction, fantasy")].map(|(a, b)| (a.to_string(), b.to_string())).into();
         assert_eq!(
-            merge_genres(["Science Fiction, drama", "science-fiction,Sci-Fi", "DRAMA"].into_iter(), "lower", ",", &al).unwrap(),
-            "drama,science fiction"
+            merge_genres(["Science Fiction, drama", "science-fiction,Sci-Fi", "DRAMA", "Sci-Fi & Fantasy"].into_iter(), "lower", ",", &al).unwrap(),
+            "drama,fantasy,science fiction"
         );
         assert!(merge_genres([""].into_iter(), "lower", ",", &Default::default()).is_none());
     }
