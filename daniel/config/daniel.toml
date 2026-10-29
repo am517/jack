@@ -1,0 +1,18 @@
+# Daniel's defaults; ~/.config/windups/daniel/config.toml overlays them.
+
+# Daniel alerts Walter (who then patrols the whole database) only when it matters: an important
+# change, enough changes, or too long since Walter's last patrol. Never for work Walter started.
+# Skipped quietly when Walter isn't installed. Found on PATH as the first word, or windups-<word>
+# (or used as given if it is a path).
+[walter]
+enabled = true
+command = ["walter", "patrol"]
+max_changes = 25        # this many changes since the last patrol
+importance = 10         # or this much importance in total (weights below)
+max_hours = 24          # or this long since the last patrol (or the first change), with changes
+
+# How much each kind of change matters.
+[importance]
+new_entry = 3           # an entry Daniel hadn't seen
+stage_change = 2        # an entry moved lifecycle stage
+update = 1              # anything else re-stored
