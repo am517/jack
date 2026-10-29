@@ -72,7 +72,7 @@ fn nothing_incomplete_is_forgotten() {
     let out = walter::run("pending", &args(&[]), &jack).unwrap();
     assert!(out.contains("2 pending"), "complete has no return: {out}");
     assert!(
-        out.contains("[unverified]") && out.contains("when new_source appears"),
+        out.contains("[unverified]") && out.contains("when julie appears"),
         "{out}"
     );
     assert!(
@@ -89,13 +89,21 @@ fn nothing_incomplete_is_forgotten() {
     // then it backs off a day
     let out = walter::run("patrol", &args(&[]), &jack).unwrap();
     assert!(out.contains("0 due"), "{out}");
-    // a new source appears in Jack's profile: what waits for new_source wakes
+    // a new source appears in Jack's profile: nothing here waits for new_source, so nothing wakes
     jack.sources.borrow_mut().push("omdb");
     let out = walter::run("patrol", &args(&[]), &jack).unwrap();
+    assert!(!out.contains("woke") && out.contains("0 due"), "{out}");
+    // Julie appears: what waits for her (the unverified entry) is due at once
+    let out = walter::run("patrol", &args(&["--wake", "julie"]), &jack).unwrap();
     assert!(
-        out.contains("woke items waiting for: omdb") && out.contains("1 due"),
+        out.contains("woke items waiting for: julie") && out.contains("1 due"),
         "{out}"
     );
+    // Daniel's call: schedule only, call nobody
+    let calls = jack.called.borrow().len();
+    let out = walter::run("note", &args(&[]), &jack).unwrap();
+    assert!(out.contains("noted:"), "{out}");
+    assert_eq!(jack.called.borrow().len(), calls);
     // Sammy named by hand
     let out = walter::run("pending", &args(&["--wake", "sammy"]), &jack).unwrap();
     assert!(out.contains("woke items waiting for: sammy"), "{out}");

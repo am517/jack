@@ -1,4 +1,4 @@
-//! Walter, the patrol windup (name pending Adam's OK). Nothing incomplete is forgotten:
+//! Walter, the patrol windup . Nothing incomplete is forgotten:
 //! `pending` lists unfinished work; `patrol` discovers capabilities, schedules returns, and calls
 //! Jack with whatever is due. No system timers: windups call windups.
 pub mod caller;
@@ -76,6 +76,11 @@ pub fn run(cmd: &str, args: &[String], caller: &dyn caller::Caller) -> Result<St
         out += &format!("woke items waiting for: {}\n", woke.join(", "));
     }
     patrol::sweep(&c, &cfg.retry).map_err(e)?;
+    if cmd == "note" {
+        // called by a windup that just added or changed something: schedule, call nobody, exit
+        let (s, c) = patrol::sweep(&c, &cfg.retry).map_err(e)?;
+        return Ok(out + &format!("noted: {s} scheduled, {c} cleared\n"));
+    }
     if cmd == "pending" {
         let all = windups::returns::pending(&c).map_err(e)?;
         out += &format!("{} pending\n", all.len());
