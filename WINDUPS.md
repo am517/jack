@@ -91,3 +91,7 @@ data) as unresolved, and changes nothing. Ambiguous cases are for a future LLM w
   (auto-filled from a source name, `display_name_set_by` = `auto:<source>` or `user`).
 - When sources about the same work disagree, a `conflicts` row records all values. Nothing is settled by assumption.
 - A file's own embedded metadata is read first and always kept as source `embedded`.
+  It is the truth for facts, not wording: a windup may refine, normalize or expand a value only when
+  it is clearly the same thing ("Joe Rogan" -> "The Joe Rogan Experience"). A contradiction ("Monica Rogan",
+  another year) never replaces it; the file's value stays and a conflict is recorded. Originals are always kept.
+- Social videos with a matched show get the show as their own parent media row.
