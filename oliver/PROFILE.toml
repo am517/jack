@@ -1,0 +1,10 @@
+name = "oliver"
+role = "matchmaker"
+summary = "Oliver breaks messy requests down, decides which windups team up, and spots gaps that need a new windup."
+purpose = "Turn messy requests into the right team of windups."
+success_checks = [
+  "every plan names the windups used and why",
+  "a need no windup covers is reported as a gap, not improvised",
+]
+status = "stub"
+command = "oliver --capabilities"
