@@ -33,14 +33,14 @@ impl Resolver for Strict {
     }
 }
 
-/// Same title (ignoring only case, punctuation and spacing) and, if a year is given, same year.
+/// Same title (ignoring only case and spacing) and, if a year is given, same year.
 pub fn exact(title: &str, year: Option<&str>, m: &Meta) -> bool {
     let t = m.get("show").or(m.get("title")).map_or("", |s| s);
     norm(t) == norm(title) && !norm(title).is_empty() && year.is_none_or(|y| m.get("year").is_some_and(|my| my == y))
 }
 
 fn norm(s: &str) -> String {
-    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+    s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -56,6 +56,8 @@ mod tests {
         assert_eq!(s.resolve("The Office", None, &[c("The Office", "2005"), c("The Office", "2001")]), Choice::Unresolved);
         assert_eq!(s.resolve("The Office", Some("2005"), &[c("The Office", "2005"), c("The Office", "2001")]), Choice::Pick(0));
         // close is not enough
+        assert_eq!(s.resolve("The Why Files", None, &[c("The Why Files?", "2005")]), Choice::None);
+        assert_eq!(s.resolve("the  why files", None, &[c("The Why Files", "2021")]), Choice::Pick(0));
         assert_eq!(s.resolve("Joe Rogan Experience", None, &[c("The Joe Rogan Experience", "2009")]), Choice::None);
         assert_eq!(s.resolve("Dr. Shawn Baker", None, &[]), Choice::None);
     }
